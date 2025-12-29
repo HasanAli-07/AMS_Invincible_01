@@ -1,0 +1,57 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper function to check authentication
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Student enrollment images (temporary)
+    match /students/{studentId}/enrollment/{imageId} {
+      // Only teachers/principals can upload enrollment images
+      allow write: if isAuthenticated() && (
+        request.auth.token.role == 'teacher' ||
+        request.auth.token.role == 'principal' ||
+        request.auth.token.role == 'admin'
+      );
+      
+      // Only teachers/principals can read enrollment images
+      allow read: if isAuthenticated() && (
+        request.auth.token.role == 'teacher' ||
+        request.auth.token.role == 'principal' ||
+        request.auth.token.role == 'admin'
+      );
+      
+      // File size limit: 5MB (FREE tier consideration)
+      allow write: if request.resource.size < 5 * 1024 * 1024;
+    }
+    
+    // Profile pictures
+    match /profiles/{userId}/{fileName} {
+      // Users can upload their own profile picture
+      // Teachers/Principals can upload for any user
+      allow write: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        request.auth.token.role == 'teacher' ||
+        request.auth.token.role == 'principal' ||
+        request.auth.token.role == 'admin'
+      );
+      
+      // All authenticated users can read profile pictures
+      allow read: if isAuthenticated();
+      
+      // File size limit: 2MB
+      allow write: if request.resource.size < 2 * 1024 * 1024;
+      
+      // Only allow image files
+      allow write: if fileName.matches('.*\\.(jpg|jpeg|png)$');
+    }
+    
+    // Deny all other access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
