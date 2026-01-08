@@ -109,11 +109,46 @@ class FirestoreStudentService {
     required List<double> embedding,
   }) async {
     try {
-      await _firestore.collection(_collection).doc(studentId).update({
-        'faceEmbeddings': FieldValue.arrayUnion([embedding]),
+      // Get current embeddings first
+      final docRef = _firestore.collection(_collection).doc(studentId);
+      final doc = await docRef.get();
+      
+      if (!doc.exists) {
+        throw Exception('Student document not found: $studentId');
+      }
+      
+      final data = doc.data() as Map<String, dynamic>;
+      final currentEmbeddings = (data['faceEmbeddings'] as List<dynamic>?) ?? [];
+      
+      // Convert existing embeddings to List<Map<String, dynamic>> format
+      // Firestore doesn't support nested arrays, so we store as array of maps
+      final embeddingsList = <Map<String, dynamic>>[];
+      
+      // Convert existing embeddings
+      for (final e in currentEmbeddings) {
+        if (e is Map) {
+          // Already in map format
+          embeddingsList.add(Map<String, dynamic>.from(e));
+        } else if (e is List) {
+          // Convert List<double> to map format
+          embeddingsList.add({
+            'vector': e.map((v) => (v as num).toDouble()).toList(),
+          });
+        }
+      }
+      
+      // Add new embedding as map (not nested array)
+      embeddingsList.add({
+        'vector': embedding,
+      });
+      
+      // Update document with new embeddings array (array of maps, not nested arrays)
+      await docRef.update({
+        'faceEmbeddings': embeddingsList,
         'updatedAt': FieldValue.serverTimestamp(),
       });
-      debugPrint('Face embedding added to student: $studentId');
+      
+      debugPrint('Face embedding added to student: $studentId (total embeddings: ${embeddingsList.length})');
     } catch (e) {
       debugPrint('Error adding face embedding: $e');
       rethrow;

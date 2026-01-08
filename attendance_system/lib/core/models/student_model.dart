@@ -5,6 +5,10 @@ class Student {
   final String name;
   final String email;
   final String rollNumber;
+  final String enrollmentNo; // New field
+  final String semester;     // New field
+  final String department;   // New field
+  final String batch;        // New field
   final String classId;
   final String? profileImageUrl;
   final DateTime enrollmentDate;
@@ -15,6 +19,10 @@ class Student {
     required this.name,
     required this.email,
     required this.rollNumber,
+    this.enrollmentNo = '',
+    this.semester = '',
+    this.department = '',
+    this.batch = '',
     required this.classId,
     this.profileImageUrl,
     required this.enrollmentDate,
@@ -32,6 +40,10 @@ class Student {
     String? name,
     String? email,
     String? rollNumber,
+    String? enrollmentNo,
+    String? semester,
+    String? department,
+    String? batch,
     String? classId,
     String? profileImageUrl,
     DateTime? enrollmentDate,
@@ -42,6 +54,10 @@ class Student {
       name: name ?? this.name,
       email: email ?? this.email,
       rollNumber: rollNumber ?? this.rollNumber,
+      enrollmentNo: enrollmentNo ?? this.enrollmentNo,
+      semester: semester ?? this.semester,
+      department: department ?? this.department,
+      batch: batch ?? this.batch,
       classId: classId ?? this.classId,
       profileImageUrl: profileImageUrl ?? this.profileImageUrl,
       enrollmentDate: enrollmentDate ?? this.enrollmentDate,
@@ -58,6 +74,7 @@ class Student {
       classId: classId,
       profileImageUrl: profileImageUrl,
       createdAt: enrollmentDate,
+      // Map extra fields if User model supports them, otherwise they are student specific
     );
   }
 }

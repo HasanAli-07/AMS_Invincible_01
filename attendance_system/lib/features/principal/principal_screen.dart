@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -488,11 +489,14 @@ class _QuickActionItem extends StatelessWidget {
 
   void _showUploadDialog(BuildContext context) {
     final csvController = TextEditingController();
+    // Closure variable to hold Excel bytes
+    Uint8List? selectedExcelBytes;
+    
     final colors = context.colors;
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Student Enrollment'),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
@@ -501,7 +505,7 @@ class _QuickActionItem extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Step 1: CSV
+                // Step 1: CSV/Excel
                 Card(
                   margin: EdgeInsets.zero,
                   color: colors.backgroundSurface,
@@ -512,7 +516,7 @@ class _QuickActionItem extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Step 1 — Upload Student CSV',
+                          'Step 1 — Upload Student Data',
                           style: TextStyle(
                             fontWeight: FontWeight.w600,
                             color: colors.textPrimary,
@@ -520,23 +524,28 @@ class _QuickActionItem extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Required headers: student_id, name, roll_no, academic_unit',
+                          'Supported: CSV or Excel (.xlsx)',
+                          style: TextStyle(color: colors.textSecondary),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Required: Name, EnrollmentNo, Semester, Department, Batch',
                           style: TextStyle(color: colors.textSecondary),
                         ),
                         const SizedBox(height: 8),
                         _FormatPill(
-                          title: 'CSV sample (copy/paste):',
+                          title: 'Format sample:',
                           content:
-                              'student_id,name,roll_no,academic_unit\n'
-                              's001,Jane Doe,10A001,CS-2024\n'
-                              's002,John Smith,10A002,CS-2024',
+                              'Name,EnrollmentNo,Semester,Department,Batch\n'
+                              'John Doe,S001,4,CS,A1\n'
+                              'Jane Smith,S002,4,IT,B1',
                         ),
                         const SizedBox(height: 12),
                         TextField(
                           controller: csvController,
                           maxLines: 4,
                           decoration: InputDecoration(
-                            hintText: 'Paste CSV rows here for quick testing',
+                            hintText: 'Select file or paste CSV text',
                             border: const OutlineInputBorder(),
                             hintStyle: TextStyle(color: colors.textSecondary),
                           ),
@@ -546,17 +555,25 @@ class _QuickActionItem extends StatelessWidget {
                           onPressed: () async {
                             final result = await FilePicker.platform.pickFiles(
                               type: FileType.custom,
-                              allowedExtensions: ['csv'],
+                              allowedExtensions: ['csv', 'xlsx'],
+                              withData: true,
                             );
                             if (result != null && result.files.isNotEmpty) {
                               final file = result.files.first;
                               final bytes = file.bytes ??
                                   await File(file.path!).readAsBytes();
-                              csvController.text = utf8.decode(bytes);
+                              
+                              if (file.extension == 'xlsx') {
+                                selectedExcelBytes = bytes;
+                                csvController.text = '[Excel File Selected: ${file.name}]';
+                              } else {
+                                selectedExcelBytes = null;
+                                csvController.text = utf8.decode(bytes);
+                              }
                             }
                           },
                           icon: const Icon(Icons.upload_file),
-                          label: const Text('Select CSV file'),
+                          label: const Text('Select CSV or Excel'),
                         ),
                       ],
                     ),
@@ -603,6 +620,7 @@ class _QuickActionItem extends StatelessWidget {
                             final zipResult = await FilePicker.platform.pickFiles(
                               type: FileType.custom,
                               allowedExtensions: ['zip'],
+                              withData: true,
                             );
                             if (zipResult == null || zipResult.files.isEmpty) return;
 
@@ -612,7 +630,7 @@ class _QuickActionItem extends StatelessWidget {
 
                             final enrollmentService = StudentImageEnrollmentService();
 
-                            Navigator.of(context).pop(); // close dialog while processing
+                            Navigator.of(dialogContext).pop(); // close dialog while processing
 
                             final messenger = ScaffoldMessenger.of(context);
                             messenger.showSnackBar(
@@ -655,50 +673,76 @@ class _QuickActionItem extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () async {
               final csvText = csvController.text.trim();
-              if (csvText.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please paste CSV data first')),
-                );
-                return;
+              
+              // Validation
+              if (csvText.isEmpty && selectedExcelBytes == null) {
+                 ScaffoldMessenger.of(context).showSnackBar(
+                   const SnackBar(content: Text('Please select a file or paste data')),
+                 );
+                 return;
               }
 
               final enrollmentService = StudentCsvEnrollmentService();
-
-              Navigator.of(context).pop(); // close dialog while processing
+              Navigator.of(dialogContext).pop(); // close dialog
 
               final messenger = ScaffoldMessenger.of(context);
               messenger.showSnackBar(
-                const SnackBar(
-                  content: Text('Importing students from CSV...'),
-                ),
+                const SnackBar(content: Text('Importing student data...')),
               );
 
               try {
-                final summary =
-                    await enrollmentService.importFromRawCsv(csvText);
+                StudentCsvImportSummary summary;
+                
+                if (selectedExcelBytes != null && csvText.startsWith('[Excel')) {
+                  // Process Excel
+                  summary = await enrollmentService.importFromExcelBytes(selectedExcelBytes!);
+                } else {
+                  // Process CSV Text
+                  summary = await enrollmentService.importFromRawCsv(csvText);
+                }
 
-                final msg = StringBuffer()
-                  ..write(
-                      'CSV import: ${summary.successCount}/${summary.totalRows} students created/updated.')
-                  ..write(
-                      summary.errorCount > 0 ? ' Errors: ${summary.errorCount}.' : '');
-
-                messenger.showSnackBar(
-                  SnackBar(content: Text(msg.toString())),
-                );
+                if (summary.errorCount > 0) {
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text('Import Failed (${summary.errorCount} errors)'),
+                      content: SizedBox(
+                        width: double.maxFinite,
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: summary.errors.length,
+                          itemBuilder: (context, index) => ListTile(
+                            leading: const Icon(Icons.error_outline, color: Colors.red),
+                            title: Text(summary.errors[index]),
+                          ),
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Close'),
+                        ),
+                      ],
+                    ),
+                  );
+                } else {
+                  messenger.showSnackBar(
+                    SnackBar(content: Text('Import: ${summary.successCount}/${summary.totalRows} students created/updated.')),
+                  );
+                }
               } catch (e) {
                 messenger.showSnackBar(
-                  SnackBar(content: Text('CSV import error: $e')),
+                  SnackBar(content: Text('Import error: $e')),
                 );
               }
             },
-            child: const Text('Import CSV'),
+            child: const Text('Import Data'),
           ),
         ],
       ),

@@ -50,3 +50,16 @@ app.*.map.json
 *.json
 !pubspec.json
 !package.json
+
+# Sensitive data files
+**/students_sample.csv
+**/Students*.zip
+**/check_zip.py
+**/*secret*.ps1
+**/*secret*.md
+**/FIX_SECRET*.md
+**/METHOD_*.md
+**/SECRET_*.md
+**/STEP_BY_STEP*.md
+**/QUICK_START.md
+**/ALL_METHODS*.md

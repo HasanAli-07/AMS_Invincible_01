@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../core/services/student_enrollment_service.dart';
 import '../../design_system/tokens/radius_tokens.dart';
@@ -17,7 +19,8 @@ class StudentEnrollmentPage extends StatefulWidget {
 class _StudentEnrollmentPageState extends State<StudentEnrollmentPage> {
   final TextEditingController _csvController = TextEditingController();
   bool _isProcessingZip = false;
-  bool _isImportingCsv = false;
+  bool _isImportingData = false;
+  Uint8List? _excelBytes;
 
   @override
   void dispose() {
@@ -25,35 +28,157 @@ class _StudentEnrollmentPageState extends State<StudentEnrollmentPage> {
     super.dispose();
   }
 
-  Future<void> _pickCsv() async {
+  Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['csv'],
+      allowedExtensions: ['csv', 'xlsx'],
+      withData: true,
     );
     if (result != null && result.files.isNotEmpty) {
       final file = result.files.first;
       final bytes = file.bytes ?? await File(file.path!).readAsBytes();
+      
       setState(() {
-        _csvController.text = utf8.decode(bytes);
+        if (file.extension == 'xlsx') {
+          _excelBytes = bytes;
+          _csvController.text = '[Excel File Selected: ${file.name}]';
+        } else {
+          _excelBytes = null;
+          _csvController.text = utf8.decode(bytes);
+        }
       });
     }
   }
 
-  Future<void> _importCsv() async {
-    final csvText = _csvController.text.trim();
-    if (csvText.isEmpty) {
-      _showSnack('Please paste or select a CSV file.');
+  Future<void> _importData() async {
+    final text = _csvController.text.trim();
+    if (text.isEmpty && _excelBytes == null) {
+      _showSnack('Please select a file or paste CSV data.');
       return;
     }
-    setState(() => _isImportingCsv = true);
+
+    setState(() => _isImportingData = true);
+    
+    // Show loading message
+    _showSnack('Importing student data...');
+    
     try {
       final enrollmentService = StudentCsvEnrollmentService();
-      await enrollmentService.importFromRawCsv(csvText);
-      _showSnack('CSV imported. Now upload ZIP for faces.');
-    } catch (e) {
-      _showSnack('CSV import error: $e');
+      StudentCsvImportSummary summary;
+
+      if (_excelBytes != null && text.startsWith('[Excel')) {
+        // Process Excel file
+        summary = await enrollmentService.importFromExcelBytes(_excelBytes!);
+      } else if (_excelBytes != null) {
+        // Excel file selected but text doesn't match - try Excel anyway
+        summary = await enrollmentService.importFromExcelBytes(_excelBytes!);
+      } else {
+        // Process CSV text
+        summary = await enrollmentService.importFromRawCsv(text);
+      }
+
+      // Show results
+      if (summary.errorCount > 0) {
+        // Show dialog with errors
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text('Import Completed with ${summary.errorCount} error(s)'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Successfully imported: ${summary.successCount} students',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    if (summary.errorCount > 0) ...[
+                      const SizedBox(height: 16),
+                      const Text('Errors:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 200,
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: summary.errors.length,
+                          itemBuilder: (context, index) => ListTile(
+                            dense: true,
+                            leading: const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                            title: Text(
+                              summary.errors[index],
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+          );
+        }
+        
+        // Also show snackbar with summary
+        if (mounted) {
+          _showSnack(
+            'Imported: ${summary.successCount}/${summary.totalRows} students. '
+            '${summary.errorCount} error(s) - see details in dialog.',
+          );
+        }
+      } else {
+        // All successful
+        if (mounted) {
+          _showSnack(
+            'Successfully imported ${summary.successCount}/${summary.totalRows} students!',
+          );
+        }
+      }
+    } catch (e, stackTrace) {
+      debugPrint('Import error: $e');
+      debugPrint('Stack trace: $stackTrace');
+      if (mounted) {
+        _showSnack('Import error: $e');
+        // Show detailed error dialog
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Import Error'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Error: $e'),
+                  const SizedBox(height: 16),
+                  const Text('Stack trace:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text(
+                    stackTrace.toString(),
+                    style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+      }
     } finally {
-      if (mounted) setState(() => _isImportingCsv = false);
+      if (mounted) setState(() => _isImportingData = false);
     }
   }
 
@@ -61,6 +186,7 @@ class _StudentEnrollmentPageState extends State<StudentEnrollmentPage> {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['zip'],
+      withData: true, // Ensure we get bytes
     );
     if (result == null || result.files.isEmpty) return;
 
@@ -76,13 +202,30 @@ class _StudentEnrollmentPageState extends State<StudentEnrollmentPage> {
     try {
       final enrollmentService = StudentImageEnrollmentService();
       final summary = await enrollmentService.enrollFromZipBytes(bytes);
+      String message;
+      if (summary.embeddingsCreated == 0) {
+        if (summary.missingStudents > 0) {
+          message = '❌ No embeddings created. ${summary.missingStudents} students not found in Firestore. '
+              'Please upload CSV/Excel first to add students.';
+        } else if (summary.imagesNoFace > 0) {
+          message = '⚠️ No embeddings created. ${summary.imagesNoFace} images had no face detected. '
+              'Please check image quality.';
+        } else if (summary.imagesMultipleFaces > 0) {
+          message = '⚠️ No embeddings created. ${summary.imagesMultipleFaces} images had multiple faces. '
+              'Please use images with single face only.';
+        } else {
+          message = '❌ No embeddings created. Check console logs for details.';
+        }
+      } else {
+        message = '✅ Done: ${summary.embeddingsCreated}/${summary.totalImages} images → embeddings. '
+            'No face: ${summary.imagesNoFace}, Multi-face: ${summary.imagesMultipleFaces}, '
+            'Missing students: ${summary.missingStudents}.';
+      }
+      
       messenger.showSnackBar(
         SnackBar(
-          content: Text(
-            'Done: ${summary.embeddingsCreated}/${summary.totalImages} images → embeddings. '
-            'No face: ${summary.imagesNoFace}, Multi-face: ${summary.imagesMultipleFaces}, '
-            'Missing students: ${summary.missingStudents}.',
-          ),
+          content: Text(message),
+          duration: const Duration(seconds: 5),
         ),
       );
     } catch (e) {
@@ -116,30 +259,31 @@ class _StudentEnrollmentPageState extends State<StudentEnrollmentPage> {
             _HeroCard(
               title: 'Enroll students in two steps',
               subtitle:
-                  'Step 1: Import student CSV\nStep 2: Upload ZIP of face photos',
+                  'Step 1: Import student Data (CSV/Excel)\nStep 2: Upload ZIP of face photos',
               icon: Icons.bolt,
             ),
             const SizedBox(height: 16),
             _StepCard(
-              title: 'Step 1 — Upload Student CSV',
+              title: 'Step 1 — Upload Student Data',
               subtitle:
-                  'Required headers: student_id, name, roll_no, academic_unit',
+                  'Required: Name, EnrollmentNo, Semester, Department, Batch',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _FormatPill(
-                    title: 'CSV sample (copy/paste):',
+                   _FormatPill(
+                    title: 'Format sample:',
                     content:
-                        'student_id,name,roll_no,academic_unit\n'
-                        's001,Jane Doe,10A001,CS-2024\n'
-                        's002,John Smith,10A002,CS-2024',
+                        'Name,EnrollmentNo,Semester,Department,Batch\n'
+                        'John Doe,S001,4,CS,A1\n'
+                        'Jane Smith,S002,4,IT,B1',
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: _csvController,
                     maxLines: 5,
+                    readOnly: _excelBytes != null,
                     decoration: InputDecoration(
-                      hintText: 'Paste CSV rows here or select a file',
+                      hintText: 'Paste CSV rows here or select a file (CSV/Excel)',
                       border: const OutlineInputBorder(),
                       hintStyle: TextStyle(color: colors.onSurfaceVariant),
                     ),
@@ -149,23 +293,23 @@ class _StudentEnrollmentPageState extends State<StudentEnrollmentPage> {
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: _pickCsv,
+                          onPressed: _pickFile,
                           icon: const Icon(Icons.upload_file),
-                          label: const Text('Select CSV file'),
+                          label: const Text('Select File'),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: FilledButton.icon(
-                          onPressed: _isImportingCsv ? null : _importCsv,
-                          icon: _isImportingCsv
+                          onPressed: _isImportingData ? null : _importData,
+                          icon: _isImportingData
                               ? const SizedBox(
                                   width: 16,
                                   height: 16,
                                   child: CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : const Icon(Icons.check_circle_outline),
-                          label: Text(_isImportingCsv ? 'Importing...' : 'Import CSV'),
+                          label: Text(_isImportingData ? 'Importing...' : 'Import Data'),
                         ),
                       ),
                     ],

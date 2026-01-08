@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'dart:typed_data';
 
 import '../../design_system/components/ds_app_bar.dart';
 import '../../design_system/components/ds_text.dart';
@@ -17,6 +18,7 @@ import '../../design_system/tokens/spacing_tokens.dart';
 import '../auth/auth_routes.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/radius_tokens.dart';
+import '../../ml/attendance_face_recognition_service.dart';
 
 /// Enhanced Teacher Dashboard with better UX and no overflow
 class TeacherDashboardScreen extends StatefulWidget {
@@ -433,16 +435,74 @@ class _HomeView extends StatelessWidget {
 
       if (image == null) return;
 
-      // TODO: Integrate with FaceRecognitionService to auto-mark attendance.
-      // For now, navigate to confirmation screen with the captured photo context.
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Photo captured for attendance')),
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
       );
 
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const AttendanceConfirmScreen()),
-      );
+      try {
+        // Read image bytes
+        final imageBytes = await image.readAsBytes();
+
+        // Process with face recognition
+        final faceRecognitionService = AttendanceFaceRecognitionService();
+        final result = await faceRecognitionService.processAttendancePhoto(
+          imageBytes: imageBytes,
+        );
+
+        // Close loading dialog
+        if (context.mounted) Navigator.pop(context);
+
+        // Show results
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Detected ${result.totalFacesDetected} faces. '
+                'Recognized ${result.recognizedCount} students.',
+              ),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+
+          // Navigate to confirmation screen with recognition results
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AttendanceConfirmScreen(
+                recognitionResult: result,
+                imagePath: image.path,
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        // Close loading dialog
+        if (context.mounted) Navigator.pop(context);
+
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Face recognition error: $e'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+
+          // Still navigate to confirmation screen even if recognition fails
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AttendanceConfirmScreen(
+                imagePath: image.path,
+              ),
+            ),
+          );
+        }
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Camera error: $e')),
@@ -461,15 +521,71 @@ class _HomeView extends StatelessWidget {
 
       if (image == null) return;
 
-      // TODO: Integrate with FaceRecognitionService to analyze uploaded photo.
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Photo selected for attendance')),
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
       );
 
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const AttendanceConfirmScreen()),
-      );
+      try {
+        // Process with face recognition
+        final faceRecognitionService = AttendanceFaceRecognitionService();
+        final result = await faceRecognitionService.processAttendancePhotoFromFile(
+          image.path,
+        );
+
+        // Close loading dialog
+        if (context.mounted) Navigator.pop(context);
+
+        // Show results
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Detected ${result.totalFacesDetected} faces. '
+                'Recognized ${result.recognizedCount} students.',
+              ),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+
+          // Navigate to confirmation screen with recognition results
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AttendanceConfirmScreen(
+                recognitionResult: result,
+                imagePath: image.path,
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        // Close loading dialog
+        if (context.mounted) Navigator.pop(context);
+
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Face recognition error: $e'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+
+          // Still navigate to confirmation screen even if recognition fails
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AttendanceConfirmScreen(
+                imagePath: image.path,
+              ),
+            ),
+          );
+        }
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Upload error: $e')),

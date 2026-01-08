@@ -54,6 +54,7 @@ class DefaultFirebaseOptions {
     // IMPORTANT: Replace with your actual Firebase configuration
     // Get values from Firebase Console > Project Settings > Your apps
     // OR use flutterfire configure command to auto-generate
+    // DO NOT COMMIT ACTUAL API KEYS - Use environment variables or flutterfire configure
     return const FirebaseOptions(
       apiKey: 'YOUR_API_KEY_HERE', // Replace with your Firebase API key
       appId: 'YOUR_APP_ID_HERE', // Replace with your app ID

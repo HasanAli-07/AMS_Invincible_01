@@ -22,6 +22,7 @@ import '../../design_system/tokens/typography_tokens.dart';
 import '../../design_system/tokens/spacing_tokens.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/radius_tokens.dart';
+import '../../features/admin/bulk_enrollment_screen.dart';
 
 class FaceRecognitionDemoScreen extends StatefulWidget {
   const FaceRecognitionDemoScreen({super.key});
@@ -55,7 +56,9 @@ class _FaceRecognitionDemoScreenState extends State<FaceRecognitionDemoScreen> {
       final faceDetector = FaceDetectorService();
       final embeddingService = FaceEmbeddingService();
       final faceMatcher = FaceMatcher(threshold: 0.70);
-      final faceRepository = InMemoryFaceRepository();
+
+      // Use Firestore for real persistence
+      final faceRepository = FirestoreFaceRepository();
 
       // Create main service
       _faceRecognition = FaceRecognitionService(
@@ -291,6 +294,16 @@ class _FaceRecognitionDemoScreenState extends State<FaceRecognitionDemoScreen> {
                 label: 'Recognize Faces (Attendance)',
                 onPressed: _isLoading ? null : _recognizeFaces,
                 icon: Icons.face,
+                variant: DSButtonVariant.secondary,
+              ),
+              Insets.spaceVertical16,
+              DSButton(
+                label: 'Bulk Enrollment (Admin)',
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BulkEnrollmentScreen()),
+                ),
+                icon: Icons.upload_file,
                 variant: DSButtonVariant.secondary,
               ),
               Insets.spaceVertical24,

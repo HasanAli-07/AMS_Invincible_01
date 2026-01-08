@@ -6,6 +6,7 @@
 /// - Managing multiple embeddings per person (for better accuracy)
 /// - Local persistence (in-memory for now, can be extended to SQLite/Hive)
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'face_models.dart';
 
 abstract class FaceRepository {
@@ -100,6 +101,104 @@ class InMemoryFaceRepository implements FaceRepository {
   Future<void> clearAll() async {
     _faces.clear();
     _userFaceIds.clear();
+  }
+}
+
+/// Firestore implementation of FaceRepository
+class FirestoreFaceRepository implements FaceRepository {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  static const String _collection = 'faces';
+
+  @override
+  Future<void> storeFace(StoredFace face) async {
+    // Convert StoredFace to Map
+    // We need to convert FaceEmbedding vector (List<double>) to dynamic for Firestore
+    final data = {
+      'userId': face.userId,
+      'userName': face.userName,
+      'embedding': face.embedding.vector,
+      'createdAt': Timestamp.fromDate(face.createdAt),
+      'imagePath': face.imagePath,
+    };
+
+    await _firestore.collection(_collection).doc(face.id).set(data);
+  }
+
+  @override
+  Future<List<StoredFace>> getFacesByUserId(String userId) async {
+    final snapshot = await _firestore
+        .collection(_collection)
+        .where('userId', isEqualTo: userId)
+        .get();
+
+    return snapshot.docs.map((doc) => _fromFirestore(doc)).toList();
+  }
+
+  @override
+  Future<List<StoredFace>> getAllFaces() async {
+    final snapshot = await _firestore.collection(_collection).get();
+    return snapshot.docs.map((doc) => _fromFirestore(doc)).toList();
+  }
+
+  @override
+  Future<StoredFace?> getFaceById(String id) async {
+    final doc = await _firestore.collection(_collection).doc(id).get();
+    if (!doc.exists) return null;
+    return _fromFirestore(doc);
+  }
+
+  @override
+  Future<void> deleteFace(String id) async {
+    await _firestore.collection(_collection).doc(id).delete();
+  }
+
+  @override
+  Future<void> deleteFacesByUserId(String userId) async {
+    // Firestore doesn't support recursive delete, so we query and delete batch
+    final snapshot = await _firestore
+        .collection(_collection)
+        .where('userId', isEqualTo: userId)
+        .get();
+
+    final batch = _firestore.batch();
+    for (final doc in snapshot.docs) {
+      batch.delete(doc.reference);
+    }
+    await batch.commit();
+  }
+
+  @override
+  Future<int> getFaceCount() async {
+    final snapshot = await _firestore.collection(_collection).count().get();
+    return snapshot.count ?? 0;
+  }
+
+  @override
+  Future<int> getUserCount() async {
+    // Firestore count queries for unique fields are expensive/complex
+    // For now, we'll fetch all and count unique userIds locally
+    // CAUTION: This is not scalable for huge datasets, but okay for MVP
+    final snapshot = await _firestore.collection(_collection).get();
+    final userIds = snapshot.docs.map((doc) => doc.data()['userId'] as String).toSet();
+    return userIds.length;
+  }
+
+  // Helper: Convert Firestore Document to StoredFace
+  StoredFace _fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data()!;
+    
+    // Parse embedding vector
+    final embeddingList = List<double>.from(data['embedding'] ?? []);
+    final embedding = FaceEmbedding(vector: embeddingList);
+
+    return StoredFace(
+      id: doc.id,
+      userId: data['userId'] ?? 'unknown',
+      userName: data['userName'] ?? 'Unknown User',
+      embedding: embedding,
+      createdAt: (data['createdAt'] as Timestamp).toDate(),
+      imagePath: data['imagePath'],
+    );
   }
 }
 

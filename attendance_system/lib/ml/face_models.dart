@@ -7,6 +7,7 @@
 /// - FaceRecognitionResult: Complete recognition result
 
 import 'dart:typed_data';
+import 'dart:math' as math;
 
 /// Represents a detected face with bounding box and metadata
 class DetectedFace {
@@ -107,19 +108,7 @@ class FaceEmbedding {
     for (final v in vec) {
       sum += v * v;
     }
-    return sqrt(sum);
-  }
-
-  double sqrt(double value) {
-    // Simple square root approximation
-    if (value == 0.0) return 0.0;
-    double guess = value;
-    double prevGuess = 0.0;
-    while ((guess - prevGuess).abs() > 0.0001) {
-      prevGuess = guess;
-      guess = (guess + value / guess) / 2;
-    }
-    return guess;
+    return math.sqrt(sum);
   }
 }
 

@@ -4,6 +4,7 @@ import 'core/state/app_state.dart';
 import 'core/providers/app_provider.dart';
 import 'core/data/data_initializer.dart';
 import 'firebase/firebase_config.dart';
+import 'ml/face_recognition_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +16,16 @@ void main() async {
     debugPrint('Firebase initialization failed: $e');
     debugPrint('App will continue with local storage only');
     // In production, you might want to handle this differently
+  }
+  
+  // Initialize Face Recognition Service
+  try {
+    await FaceRecognitionProvider.instance.initialize(useFirestore: true);
+    debugPrint('Face recognition service initialized successfully');
+  } catch (e) {
+    debugPrint('Face recognition initialization failed: $e');
+    debugPrint('Face recognition will use fallback mode (mock embeddings)');
+    // App will continue, but face recognition may not work properly
   }
   
   // Initialize app state

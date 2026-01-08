@@ -9,10 +9,18 @@ import '../../design_system/tokens/typography_tokens.dart';
 import '../../design_system/tokens/spacing_tokens.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/radius_tokens.dart';
+import '../../ml/attendance_face_recognition_service.dart';
 
 /// Enhanced Attendance Confirmation Screen - No duplicates, proper layout
 class AttendanceConfirmScreen extends StatelessWidget {
-  const AttendanceConfirmScreen({super.key});
+  final AttendancePhotoResult? recognitionResult;
+  final String? imagePath;
+
+  const AttendanceConfirmScreen({
+    super.key,
+    this.recognitionResult,
+    this.imagePath,
+  });
 
   @override
   Widget build(BuildContext context) {
