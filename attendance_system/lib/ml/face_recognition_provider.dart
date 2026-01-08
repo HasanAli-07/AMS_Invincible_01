@@ -41,7 +41,7 @@ class FaceRecognitionProvider {
       // Create services
       final faceDetector = FaceDetectorService();
       final embeddingService = FaceEmbeddingService();
-      final faceMatcher = FaceMatcher(threshold: 0.70); // 70% similarity threshold
+      final faceMatcher = FaceMatcher(threshold: 0.60); // 60% similarity threshold (tuned for group photos)
 
       // Choose repository (Firestore for production, InMemory for testing)
       final FaceRepository faceRepository = useFirestore

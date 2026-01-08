@@ -10,6 +10,7 @@
 ///   code: string
 ///   department: string
 ///   credits: number
+///   isLab: boolean (true for lab, false for theory)
 ///   description: string?
 ///   createdAt: Timestamp
 ///   updatedAt: Timestamp
@@ -28,6 +29,7 @@ class FirestoreSubjectService {
     required String code,
     required String department,
     required int credits,
+    required bool isLab,
     String? description,
   }) async {
     try {
@@ -36,6 +38,7 @@ class FirestoreSubjectService {
         'code': code.toUpperCase(),
         'department': department,
         'credits': credits,
+        'isLab': isLab,
         'description': description,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -95,6 +98,7 @@ class FirestoreSubjectService {
     String? code,
     String? department,
     int? credits,
+    bool? isLab,
     String? description,
   }) async {
     try {
@@ -106,6 +110,7 @@ class FirestoreSubjectService {
       if (code != null) updates['code'] = code.toUpperCase();
       if (department != null) updates['department'] = department;
       if (credits != null) updates['credits'] = credits;
+      if (isLab != null) updates['isLab'] = isLab;
       if (description != null) updates['description'] = description;
 
       await _firestore.collection(_collection).doc(subjectId).update(updates);
@@ -133,7 +138,12 @@ class FirestoreSubjectService {
     return {
       'id': doc.id,
       ...data,
+      // Ensure isLab defaults to false if not present (for backward compatibility)
+      'isLab': data['isLab'] ?? false,
     };
   }
+
+  /// Expose collection name for external services
+  String get collectionName => _collection;
 }
 

@@ -6,7 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../core/services/student_enrollment_service.dart';
+import '../../ml/face_repository.dart';
+import '../../ml/face_recognition_service.dart';
+import '../../ml/face_detector_service.dart';
+import '../../ml/face_embedding_service.dart';
+import '../../ml/face_matcher.dart';
 import '../../design_system/tokens/radius_tokens.dart';
+import '../../design_system/tokens/spacing_tokens.dart';
 
 /// Dedicated screen for student enrollment (CSV + ZIP)
 class StudentEnrollmentPage extends StatefulWidget {
@@ -182,6 +188,66 @@ class _StudentEnrollmentPageState extends State<StudentEnrollmentPage> {
     }
   }
 
+  Future<void> _deleteAllFaces() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete All Embeddings?'),
+        content: const Text(
+            'This will permanently remove all face data from Firestore. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete Everything'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _isProcessingZip = true;
+    });
+
+    try {
+      // Manual instantiation since DI is minimal in this view
+      final faceDetector = FaceDetectorService();
+      final embeddingService = FaceEmbeddingService();
+      await embeddingService.initialize();
+      final faceMatcher = FaceMatcher();
+      final faceRepository = FirestoreFaceRepository();
+
+      final faceRecognition = FaceRecognitionService(
+        faceDetector: faceDetector,
+        embeddingService: embeddingService,
+        faceMatcher: faceMatcher,
+        faceRepository: faceRepository,
+      );
+
+      await faceRecognition.deleteAllFaces();
+
+      if (mounted) {
+        _showSnack('✅ All face embeddings have been deleted successfully.');
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnack('❌ Deletion failed: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessingZip = false;
+        });
+      }
+    }
+  }
+
   Future<void> _pickZip() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -350,6 +416,56 @@ class _StudentEnrollmentPageState extends State<StudentEnrollmentPage> {
                 ],
               ),
             ),
+            const SizedBox(height: 24),
+            // Danger Zone
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.05),
+                borderRadius: RadiusTokens.card,
+                border: Border.all(color: Colors.red.withOpacity(0.2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded, color: Colors.red),
+                      SizedBox(width: 8),
+                      Text(
+                        'Danger Zone',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Need a fresh start? Delete all existing face data from Firestore before uploading new files.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: (_isProcessingZip || _isImportingData)
+                          ? null
+                          : _deleteAllFaces,
+                      icon: const Icon(Icons.delete_forever),
+                      label: const Text('Delete All Face Embeddings'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 32),
           ],
         ),
       ),

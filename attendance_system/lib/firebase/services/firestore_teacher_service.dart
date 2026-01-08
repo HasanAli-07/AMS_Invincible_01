@@ -11,6 +11,7 @@
 ///   department: string
 ///   subjectIds: string[]
 ///   classIds: string[]
+///   password: string (default: "123456")
 ///   joinDate: Timestamp
 ///   createdAt: Timestamp
 ///   updatedAt: Timestamp
@@ -30,6 +31,7 @@ class FirestoreTeacherService {
     required String department,
     List<String>? subjectIds,
     List<String>? classIds,
+    String password = '123456', // Default password for all teachers
     DateTime? joinDate,
   }) async {
     try {
@@ -39,6 +41,7 @@ class FirestoreTeacherService {
         'department': department,
         'subjectIds': subjectIds ?? [],
         'classIds': classIds ?? [],
+        'password': password, // Store password in Firestore
         'joinDate': joinDate != null
             ? Timestamp.fromDate(joinDate)
             : FieldValue.serverTimestamp(),
@@ -101,6 +104,7 @@ class FirestoreTeacherService {
     String? department,
     List<String>? subjectIds,
     List<String>? classIds,
+    String? password,
   }) async {
     try {
       final updates = <String, dynamic>{
@@ -112,6 +116,7 @@ class FirestoreTeacherService {
       if (department != null) updates['department'] = department;
       if (subjectIds != null) updates['subjectIds'] = subjectIds;
       if (classIds != null) updates['classIds'] = classIds;
+      if (password != null) updates['password'] = password;
 
       await _firestore.collection(_collection).doc(teacherId).update(updates);
       debugPrint('Teacher updated: $teacherId');
@@ -120,6 +125,9 @@ class FirestoreTeacherService {
       rethrow;
     }
   }
+
+  /// Expose collection name for external services
+  String get collectionName => _collection;
 
   /// Delete teacher
   Future<void> deleteTeacher(String teacherId) async {

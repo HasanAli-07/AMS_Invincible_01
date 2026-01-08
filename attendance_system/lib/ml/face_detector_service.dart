@@ -8,7 +8,10 @@
 
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'dart:ui' show Size;
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart'
     show
         FaceDetector,
@@ -66,12 +69,30 @@ class FaceDetectorService {
     return await _detectFaces(inputImage);
   }
 
+  /// Detect all faces in encoded image bytes (JPEG/PNG)
+  /// Saves to a temp file because ML Kit's fromBytes expects raw pixels
+  Future<List<DetectedFace>> detectFacesFromEncodedBytes(Uint8List imageBytes) async {
+    final tempDir = await getTemporaryDirectory();
+    final tempPath = p.join(tempDir.path, 'temp_face_detection_${DateTime.now().millisecondsSinceEpoch}.jpg');
+    final tempFile = File(tempPath);
+    await tempFile.writeAsBytes(imageBytes);
+    
+    try {
+      final faces = await detectFacesFromFile(tempPath);
+      return faces;
+    } finally {
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+    }
+  }
+
   /// Detect all faces in an InputImage
   Future<List<DetectedFace>> _detectFaces(InputImage inputImage) async {
     try {
       final faces = await _faceDetector.processImage(inputImage);
       
-      return faces.map((face) {
+      final results = faces.map((face) {
         final boundingBox = face.boundingBox;
         
         return DetectedFace(
@@ -88,6 +109,9 @@ class FaceDetectorService {
           headEulerAngleZ: face.headEulerAngleZ,
         );
       }).toList();
+      
+      debugPrint(' FaceDetectorService: AI detected ${results.length} faces');
+      return results;
     } catch (e) {
       throw Exception('Face detection failed: $e');
     }

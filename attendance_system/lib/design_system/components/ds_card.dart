@@ -7,10 +7,12 @@ import '../tokens/spacing_tokens.dart';
 
 class DSCard extends StatelessWidget {
   final Widget child;
+  final EdgeInsets? padding;
 
   const DSCard({
     super.key,
     required this.child,
+    this.padding,
   });
 
   @override
@@ -30,7 +32,7 @@ class DSCard extends StatelessWidget {
           ),
         ],
       ),
-      padding: Insets.cardPadding,
+      padding: padding ?? Insets.cardPadding,
       child: child,
     );
   }

@@ -12,7 +12,9 @@
 /// final result = await service.processAttendancePhoto(imageBytes);
 /// ```
 
+import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'face_recognition_provider.dart';
 import 'face_models.dart';
 
@@ -22,10 +24,12 @@ class AttendancePhotoResult {
   final int totalFacesDetected;
   final int recognizedCount;
   final int unknownCount;
+  final Uint8List? imageBytes; // Store image for preview
 
   AttendancePhotoResult({
     required this.recognizedStudents,
     required this.totalFacesDetected,
+    this.imageBytes,
   }) : recognizedCount = recognizedStudents.where((s) => s.isRecognized).length,
        unknownCount = recognizedStudents.where((s) => !s.isRecognized).length;
 }
@@ -53,9 +57,10 @@ class AttendanceFaceRecognitionService {
   /// Returns list of recognized students with their IDs and confidence scores
   Future<AttendancePhotoResult> processAttendancePhoto({
     required Uint8List imageBytes,
-    int imageWidth = 640,
-    int imageHeight = 480,
+    int? imageWidth,
+    int? imageHeight,
   }) async {
+    debugPrint(' AttendanceFaceRecognitionService: Processing photo (${imageBytes.length} bytes)');
     try {
       // Get face recognition service
       final faceRecognition = FaceRecognitionProvider.instance.service;
@@ -78,7 +83,11 @@ class AttendanceFaceRecognitionService {
             faceBoundingBox: face.detectedFace.boundingBox,
           );
         } else {
+          // Return unrecognized student but include best match info if available
           return RecognizedStudent(
+            studentId: face.match?.matchedFace.userId,
+            studentName: face.match?.matchedFace.userName,
+            confidence: face.match?.similarity,
             isRecognized: false,
             faceBoundingBox: face.detectedFace.boundingBox,
           );
@@ -88,12 +97,14 @@ class AttendanceFaceRecognitionService {
       return AttendancePhotoResult(
         recognizedStudents: recognizedStudents,
         totalFacesDetected: recognitionResult.totalFacesDetected,
+        imageBytes: imageBytes,
       );
     } catch (e) {
       // If face recognition fails, return empty result
       return AttendancePhotoResult(
         recognizedStudents: [],
         totalFacesDetected: 0,
+        imageBytes: imageBytes,
       );
     }
   }
@@ -118,21 +129,35 @@ class AttendanceFaceRecognitionService {
             faceBoundingBox: face.detectedFace.boundingBox,
           );
         } else {
+          // Return unrecognized student but include best match info if available
           return RecognizedStudent(
+            studentId: face.match?.matchedFace.userId,
+            studentName: face.match?.matchedFace.userName,
+            confidence: face.match?.similarity,
             isRecognized: false,
             faceBoundingBox: face.detectedFace.boundingBox,
           );
         }
       }).toList();
 
+      final fileBytes = await File(imagePath).readAsBytes();
+
       return AttendancePhotoResult(
         recognizedStudents: recognizedStudents,
         totalFacesDetected: recognitionResult.totalFacesDetected,
+        imageBytes: fileBytes,
       );
     } catch (e) {
+      debugPrint(' AttendanceFaceRecognitionService: Error processing file: $e');
+      Uint8List? fileBytes;
+      try {
+        fileBytes = await File(imagePath).readAsBytes();
+      } catch (_) {}
+      
       return AttendancePhotoResult(
         recognizedStudents: [],
         totalFacesDetected: 0,
+        imageBytes: fileBytes,
       );
     }
   }
@@ -140,4 +165,3 @@ class AttendanceFaceRecognitionService {
   /// Check if face recognition is available
   bool get isAvailable => FaceRecognitionProvider.instance.isInitialized;
 }
-

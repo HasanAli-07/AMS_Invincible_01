@@ -18,6 +18,10 @@ import 'package:flutter/foundation.dart';
 /// 5. Follow Firebase Flutter setup guide
 Future<void> initializeFirebase() async {
   try {
+    if (Firebase.apps.isNotEmpty) {
+      debugPrint('Firebase already initialized');
+      return;
+    }
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );

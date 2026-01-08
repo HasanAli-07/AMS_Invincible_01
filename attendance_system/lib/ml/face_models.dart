@@ -29,17 +29,20 @@ class DetectedFace {
 
   /// Check if face quality is acceptable for recognition
   /// Reject faces that are too rotated or eyes are closed
-  bool get isAcceptableQuality {
-    // Reject if head is rotated too much (more than 30 degrees)
-    if (headEulerAngleY != null && headEulerAngleY!.abs() > 30) {
+  /// [strict] if true, uses strict rules (recommended for registration)
+  bool isAcceptableQuality({bool strict = false}) {
+    // Rotation limit: 45 degrees for recognition, 30 for registration
+    final rotationLimit = strict ? 30 : 45;
+    
+    if (headEulerAngleY != null && headEulerAngleY!.abs() > rotationLimit) {
       return false;
     }
-    if (headEulerAngleZ != null && headEulerAngleZ!.abs() > 30) {
+    if (headEulerAngleZ != null && headEulerAngleZ!.abs() > rotationLimit) {
       return false;
     }
     
-    // Reject if both eyes are closed
-    if (leftEyeOpenProbability != null && 
+    // For registration, we want eyes open
+    if (strict && leftEyeOpenProbability != null && 
         rightEyeOpenProbability != null &&
         leftEyeOpenProbability! < 0.3 && 
         rightEyeOpenProbability! < 0.3) {

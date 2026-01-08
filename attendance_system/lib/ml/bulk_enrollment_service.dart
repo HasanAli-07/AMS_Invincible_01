@@ -20,6 +20,8 @@ class BulkEnrollmentService {
     required FaceRecognitionService faceRecognitionService,
   }) : _faceRecognitionService = faceRecognitionService;
 
+  FaceRecognitionService get faceRecognitionService => _faceRecognitionService;
+
   /// Process Bulk Enrollment
   /// 
   /// Returns a report of success/failures

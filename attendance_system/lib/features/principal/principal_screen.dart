@@ -27,7 +27,10 @@ import '../../core/services/student_enrollment_service.dart';
 import '../auth/auth_routes.dart';
 import 'principal_dashboard_data.dart';
 import 'student_enrollment_page.dart';
+import 'subject_enrollment_page.dart';
+import 'teacher_enrollment_page.dart';
 import 'view_models/principal_view_model.dart';
+import '../../core/services/batch_update_service.dart';
 
 /// Enhanced Principal Dashboard - Simplified card structure
 class PrincipalScreen extends StatefulWidget {
@@ -464,13 +467,21 @@ class _QuickActionItem extends StatelessWidget {
         );
         break;
       case '/principal/manage-teachers':
-        _showManageTeachers(context);
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const TeacherEnrollmentPage(),
+          ),
+        );
         break;
       case '/principal/academic-units':
         _showManageClasses(context);
         break;
       case '/principal/subjects':
-        _showManageSubjects(context);
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const SubjectEnrollmentPage(),
+          ),
+        );
         break;
       case '/principal/posts':
         Navigator.of(context).pushNamed('/posts');
@@ -480,10 +491,84 @@ class _QuickActionItem extends StatelessWidget {
           const SnackBar(content: Text('Settings - Coming soon')),
         );
         break;
+      case '/principal/update-batch':
+        _updateAllStudentsToBatch5(context);
+        break;
       default:
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${action.title} - Coming soon')),
         );
+    }
+  }
+
+  Future<void> _updateAllStudentsToBatch5(BuildContext context) async {
+    // Show confirmation dialog
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Update All Students to Batch 5'),
+        content: const Text(
+          'This will update all students in the database to batch/class = 5. '
+          'This action cannot be undone. Do you want to continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    // Show loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final batchService = BatchUpdateService();
+      final result = await batchService.updateAllStudentsToBatch5();
+
+      if (context.mounted) {
+        Navigator.pop(context); // Close loading
+
+        if (result['success'] == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Successfully updated ${result['updatedCount']} students to batch 5. '
+                'Errors: ${result['errorCount']}',
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: ${result['error']}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.pop(context); // Close loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating students: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 

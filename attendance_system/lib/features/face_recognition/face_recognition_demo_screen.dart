@@ -185,6 +185,52 @@ class _FaceRecognitionDemoScreenState extends State<FaceRecognitionDemoScreen> {
     }
   }
 
+  Future<void> _deleteAllFaces() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete All Embeddings?'),
+        content: const Text('This will permanently remove all face data from Firestore. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete Everything'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      setState(() {
+        _isLoading = true;
+        _statusMessage = 'Deleting all face embeddings...';
+      });
+
+      await _faceRecognition.deleteAllFaces();
+
+      // Update statistics
+      _statistics = await _faceRecognition.getStatistics();
+
+      setState(() {
+        _isLoading = false;
+        _statusMessage = 'All face embeddings have been deleted.';
+        _recentResults.insert(0, '⚠️ ALL EMBEDDINGS DELETED');
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _statusMessage = 'Deletion failed: $e';
+      });
+    }
+  }
+
   Future<String?> _showUserInputDialog(String title, String hint) async {
     final controller = TextEditingController();
     
@@ -305,6 +351,13 @@ class _FaceRecognitionDemoScreenState extends State<FaceRecognitionDemoScreen> {
                 ),
                 icon: Icons.upload_file,
                 variant: DSButtonVariant.secondary,
+              ),
+              Insets.spaceVertical16,
+              DSButton(
+                label: 'Delete All Embeddings',
+                onPressed: _isLoading ? null : _deleteAllFaces,
+                icon: Icons.delete_forever,
+                variant: DSButtonVariant.danger,
               ),
               Insets.spaceVertical24,
             ],

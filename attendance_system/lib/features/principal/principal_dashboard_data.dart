@@ -132,6 +132,12 @@ class PrincipalDashboardMockData {
       icon: Icons.settings_outlined,
       routeName: '/principal/settings',
     ),
+    CoreAction(
+      title: 'Update Batch',
+      helperText: 'Set all to Batch 5',
+      icon: Icons.update,
+      routeName: '/principal/update-batch',
+    ),
   ];
 
   static const List<AttendanceInsight> analyticsInsights = [

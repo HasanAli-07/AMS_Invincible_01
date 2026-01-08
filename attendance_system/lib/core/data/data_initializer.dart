@@ -25,11 +25,11 @@ class DataInitializer {
   }) async {
     // Create subjects
     final subjects = [
-      Subject(id: 'subj-1', name: 'Mathematics', code: 'MATH101', department: 'Science', credits: 4),
-      Subject(id: 'subj-2', name: 'Physics', code: 'PHY101', department: 'Science', credits: 4),
-      Subject(id: 'subj-3', name: 'Chemistry', code: 'CHEM101', department: 'Science', credits: 4),
-      Subject(id: 'subj-4', name: 'Computer Science', code: 'CS101', department: 'Computer Science', credits: 3),
-      Subject(id: 'subj-5', name: 'English', code: 'ENG101', department: 'Languages', credits: 3),
+      Subject(id: 'subj-1', name: 'Mathematics', code: 'MATH101', department: 'Science', credits: 4, isLab: false),
+      Subject(id: 'subj-2', name: 'Physics', code: 'PHY101', department: 'Science', credits: 4, isLab: false),
+      Subject(id: 'subj-3', name: 'Chemistry', code: 'CHEM101', department: 'Science', credits: 4, isLab: false),
+      Subject(id: 'subj-4', name: 'Computer Science', code: 'CS101', department: 'Computer Science', credits: 3, isLab: false),
+      Subject(id: 'subj-5', name: 'English', code: 'ENG101', department: 'Languages', credits: 3, isLab: false),
     ];
 
     for (final subject in subjects) {

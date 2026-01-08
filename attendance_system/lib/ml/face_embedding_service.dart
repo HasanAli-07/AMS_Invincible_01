@@ -11,6 +11,7 @@
 
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
@@ -21,8 +22,8 @@ class FaceEmbeddingService {
   bool _isInitialized = false;
   
   // Model configuration
-  static const int _inputSize = 112; // Standard face recognition input size
-  static const int _embeddingSize = 128; // Embedding dimension (adjust based on model)
+  static const int _inputSize = 112; 
+  int _embeddingSize = 192; // Updated to match the current model
   static const String _modelPath = 'assets/models/face_recognition.tflite';
 
   /// Initialize TFLite interpreter with face recognition model
@@ -41,15 +42,21 @@ class FaceEmbeddingService {
       final inputShape = _interpreter!.getInputTensor(0).shape;
       final outputShape = _interpreter!.getOutputTensor(0).shape;
 
-      print('Model loaded successfully');
-      print('Input shape: $inputShape');
-      print('Output shape: $outputShape');
+      debugPrint('Model loaded successfully');
+      debugPrint('Input shape: $inputShape');
+      debugPrint('Output shape: $outputShape');
+
+      // Update embedding size dynamically if possible
+      if (outputShape.length >= 2) {
+        _embeddingSize = outputShape[1];
+        debugPrint('Detected embedding size: $_embeddingSize');
+      }
 
       _isInitialized = true;
     } catch (e) {
       // If model file doesn't exist, create a fallback
-      print('Warning: TFLite model not found. Using fallback embedding generator.');
-      print('To use real face recognition, add a TFLite model at: $_modelPath');
+      debugPrint('Warning: TFLite model not found. Using fallback embedding generator.');
+      debugPrint('To use real face recognition, add a TFLite model at: $_modelPath');
       _isInitialized = false;
     }
   }
@@ -67,11 +74,10 @@ class FaceEmbeddingService {
 
     try {
       // Preprocess image
-      final preprocessed = await _preprocessImage(faceImageBytes);
+      final input = await _preprocessImage(faceImageBytes);
 
-      // Prepare input
-      final input = [preprocessed];
-      final output = List.filled(1, List.filled(_embeddingSize, 0.0));
+      // Prepare output
+      final output = [List<double>.filled(_embeddingSize, 0.0)];
 
       // Run inference
       _interpreter!.run(input, output);

@@ -7,6 +7,7 @@
 /// - Local persistence (in-memory for now, can be extended to SQLite/Hive)
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'face_models.dart';
 
 abstract class FaceRepository {
@@ -33,6 +34,9 @@ abstract class FaceRepository {
 
   /// Get count of unique users
   Future<int> getUserCount();
+
+  /// Delete all stored faces
+  Future<void> deleteAllFaces();
 }
 
 /// In-memory implementation of FaceRepository
@@ -98,7 +102,8 @@ class InMemoryFaceRepository implements FaceRepository {
   }
 
   /// Clear all stored faces (for testing/reset)
-  Future<void> clearAll() async {
+  @override
+  Future<void> deleteAllFaces() async {
     _faces.clear();
     _userFaceIds.clear();
   }
@@ -136,8 +141,48 @@ class FirestoreFaceRepository implements FaceRepository {
 
   @override
   Future<List<StoredFace>> getAllFaces() async {
-    final snapshot = await _firestore.collection(_collection).get();
-    return snapshot.docs.map((doc) => _fromFirestore(doc)).toList();
+    // 1. Fetch from 'faces' collection (primary)
+    final faceSnapshot = await _firestore.collection(_collection).get();
+    final faces = faceSnapshot.docs.map((doc) => _fromFirestore(doc)).toList();
+
+    // 2. Fetch from 'students' collection (legacy/embedded)
+    try {
+      final studentSnapshot = await _firestore.collection('students').get();
+      for (final doc in studentSnapshot.docs) {
+        final data = doc.data();
+        if (data.containsKey('faceEmbeddings') && data['faceEmbeddings'] is List) {
+          final studentId = doc.id; // Use doc ID as student ID
+          final userName = data['name'] ?? 'Unknown Student';
+          final rawEmbeddings = data['faceEmbeddings'] as List;
+
+          for (int i = 0; i < rawEmbeddings.length; i++) {
+            final e = rawEmbeddings[i];
+            List<double> vector;
+
+            if (e is Map && e.containsKey('vector')) {
+              vector = List<double>.from(e['vector']);
+            } else if (e is List) {
+              vector = List<double>.from(e);
+            } else {
+              continue; 
+            }
+
+            faces.add(StoredFace(
+              id: '${studentId}_$i',
+              userId: studentId,
+              userName: userName,
+              embedding: FaceEmbedding(vector: vector),
+              createdAt: DateTime.now(), // Fallback
+              imagePath: null,
+            ));
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching student embeddings: $e');
+    }
+
+    return faces;
   }
 
   @override
@@ -165,6 +210,46 @@ class FirestoreFaceRepository implements FaceRepository {
       batch.delete(doc.reference);
     }
     await batch.commit();
+  }
+
+  @override
+  Future<void> deleteAllFaces() async {
+    // 1. Delete all in 'faces' collection
+    final faceSnapshot = await _firestore.collection(_collection).get();
+    WriteBatch faceBatch = _firestore.batch();
+    int faceCount = 0;
+    
+    for (final doc in faceSnapshot.docs) {
+      faceBatch.delete(doc.reference);
+      faceCount++;
+      if (faceCount >= 400) {
+        await faceBatch.commit();
+        faceBatch = _firestore.batch();
+        faceCount = 0;
+      }
+    }
+    if (faceCount > 0) await faceBatch.commit();
+
+    // 2. Clear 'faceEmbeddings' in 'students' collection
+    // This is necessary because some services store embeddings here directly
+    final studentSnapshot = await _firestore.collection('students').get();
+    WriteBatch studentBatch = _firestore.batch();
+    int studentCount = 0;
+    
+    for (final doc in studentSnapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data.containsKey('faceEmbeddings')) {
+        studentBatch.update(doc.reference, {'faceEmbeddings': []});
+        studentCount++;
+        
+        if (studentCount >= 400) {
+          await studentBatch.commit();
+          studentBatch = _firestore.batch();
+          studentCount = 0;
+        }
+      }
+    }
+    if (studentCount > 0) await studentBatch.commit();
   }
 
   @override

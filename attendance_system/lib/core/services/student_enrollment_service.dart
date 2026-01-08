@@ -178,14 +178,14 @@ class StudentCsvEnrollmentService {
         // We map 'enrollmentNo' to 'studentId' and 'rollNumber' for backward compatibility
         debugPrint('Uploading student to Firestore: $enrollmentNo - $name');
         try {
-          await _studentService.upsertStudentWithId(
-            studentId: enrollmentNo, 
-            name: name,
-            rollNumber: enrollmentNo, // Using enrollmentNo as rollNumber
-            classId: '$department-$semester-$batch', // Generate academic unit/classId
-            email: null,
-            // TODO: Update upsertStudentWithId to accept new fields if Firestore needs them explicitly
-          );
+        await _studentService.upsertStudentWithId(
+          studentId: enrollmentNo, 
+          name: name,
+          rollNumber: enrollmentNo, // Using enrollmentNo as rollNumber
+          classId: '$department-$semester-$batch', // Generate academic unit/classId
+          email: null,
+          // TODO: Update upsertStudentWithId to accept new fields if Firestore needs them explicitly
+        );
           debugPrint('Successfully uploaded student: $enrollmentNo');
         } catch (firestoreError) {
           debugPrint('Firestore upload error for $enrollmentNo: $firestoreError');
@@ -202,7 +202,7 @@ class StudentCsvEnrollmentService {
     }
 
     debugPrint('CSV import completed: $success successes, $error errors out of ${rows.length - 1} total rows');
-    
+
     return StudentCsvImportSummary(
       totalRows: rows.length - 1,
       successCount: success,
@@ -362,13 +362,13 @@ class StudentCsvEnrollmentService {
 
         debugPrint('Uploading student to Firestore: $enrollmentNo - $name');
         try {
-          await _studentService.upsertStudentWithId(
-            studentId: enrollmentNo, 
-            name: name,
-            rollNumber: enrollmentNo, 
-            classId: '$department-$semester-$batch',
-            email: null,
-          );
+        await _studentService.upsertStudentWithId(
+          studentId: enrollmentNo, 
+          name: name,
+          rollNumber: enrollmentNo, 
+          classId: '$department-$semester-$batch',
+          email: null,
+        );
           debugPrint('Successfully uploaded student: $enrollmentNo');
         } catch (firestoreError) {
           debugPrint('Firestore upload error for $enrollmentNo: $firestoreError');
@@ -462,16 +462,41 @@ class StudentImageEnrollmentService {
 
     for (final file in archive) {
       if (!file.isFile) continue;
-      final path = file.name; // e.g., S001/img1.jpg or Students - Copy/S001/img1.jpg
-      final segments = path.split(RegExp(r'[\\/]+')).where((s) => s.trim().isNotEmpty).toList();
-      if (segments.length < 2) continue;
+      final path = file.name; 
       
-      // Find studentId: it's the folder name that contains the image file
-      // For "Students - Copy/240140107001/image.jpg", studentId = "240140107001"
-      // For "S001/img1.jpg", studentId = "S001"
-      // The studentId is always the second-to-last segment (folder containing the image)
-      final studentId = segments[segments.length - 2].trim();
-      if (studentId.isEmpty) continue;
+      // Ignore OS-generated metadata files
+      if (path.contains('__MACOSX') || path.contains('.DS_Store')) {
+        continue;
+      }
+
+      final segments = path.split(RegExp(r'[\\/]+')).where((s) => s.trim().isNotEmpty).toList();
+      String studentId = '';
+
+      if (segments.length >= 2) {
+        // Nested folder: folder/studentId/img.jpg or studentId/img.jpg
+        studentId = segments[segments.length - 2].trim();
+      } else if (segments.length == 1) {
+        // Flat ZIP: studentId.jpg or studentId_1.jpg
+        final fileName = segments[0];
+        final dotIdx = fileName.lastIndexOf('.');
+        final nameWithoutExt = dotIdx != -1 ? fileName.substring(0, dotIdx) : fileName;
+        
+        // Take everything before first underscore or space as ID
+        final underscoreIdx = nameWithoutExt.indexOf('_');
+        final spaceIdx = nameWithoutExt.indexOf(' ');
+        int splitIdx = -1;
+        if (underscoreIdx != -1 && spaceIdx != -1) splitIdx = underscoreIdx < spaceIdx ? underscoreIdx : spaceIdx;
+        else if (underscoreIdx != -1) splitIdx = underscoreIdx;
+        else if (spaceIdx != -1) splitIdx = spaceIdx;
+
+        studentId = splitIdx != -1 ? nameWithoutExt.substring(0, splitIdx) : nameWithoutExt;
+        debugPrint('Flat ZIP detected. File: $fileName parsed as Student ID: $studentId');
+      }
+
+      if (studentId.isEmpty) {
+        debugPrint('⚠️ Could not determine Student ID for path: $path');
+        continue;
+      }
       
       filesByStudent.putIfAbsent(studentId, () => []).add(file);
       totalImages++;
@@ -684,8 +709,8 @@ class StudentImageEnrollmentService {
         if (studentDoc == null || !studentDoc!.exists) {
           debugPrint('❌ Student $studentId not found in Firestore (checked document ID, rollNumber, enrollmentNo fields)');
           debugPrint('   Tip: Make sure enrollment number matches Firestore document ID or rollNumber/enrollmentNo field');
-          missingStudents++;
-          continue;
+        missingStudents++;
+        continue;
         }
       } else {
         debugPrint('✅ Student $studentId found in Firestore by document ID');
@@ -710,10 +735,10 @@ class StudentImageEnrollmentService {
 
           // 1) Upload temporarily to Storage (optional - skip if fails)
           try {
-            await _storageService.uploadStudentEnrollmentImage(
+          await _storageService.uploadStudentEnrollmentImage(
               studentId: finalStudentId,
-              imageBytes: imageBytes,
-            );
+            imageBytes: imageBytes,
+          );
             debugPrint('Image uploaded to Storage successfully');
           } catch (storageError) {
             debugPrint('⚠️ Storage upload failed (continuing anyway): $storageError');
@@ -765,10 +790,10 @@ class StudentImageEnrollmentService {
           // 5) Store embedding on student document (use actual document ID)
           debugPrint('Storing embedding to Firestore for student $finalStudentId...');
           try {
-            await _studentService.addFaceEmbedding(
+          await _studentService.addFaceEmbedding(
               studentId: finalStudentId,
-              embedding: embedding.vector,
-            );
+            embedding: embedding.vector,
+          );
             debugPrint('✅ Embedding stored successfully in Firestore');
           } catch (e) {
             debugPrint('❌ Error storing embedding: $e');
@@ -804,7 +829,7 @@ class StudentImageEnrollmentService {
     debugPrint('  Images with multiple faces: $imagesMultipleFaces');
     debugPrint('  Missing students: $missingStudents');
     debugPrint('=' * 50);
-    
+
     return StudentImageEnrollmentSummary(
       totalImages: totalImages,
       embeddingsCreated: embeddingsCreated,

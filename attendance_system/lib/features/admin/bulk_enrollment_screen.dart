@@ -54,7 +54,8 @@ class _BulkEnrollmentScreenState extends State<BulkEnrollmentScreen> {
   void _initializeServices() {
     // In a real app, use dependency injection (Provider/GetIt)
     final faceDetector = FaceDetectorService();
-    final embeddingService = FaceEmbeddingService()..initialize();
+    final embeddingService = FaceEmbeddingService();
+    embeddingService.initialize();
     final faceMatcher = FaceMatcher();
     final faceRepository = FirestoreFaceRepository(); // Use Firestore
 
@@ -164,6 +165,49 @@ class _BulkEnrollmentScreenState extends State<BulkEnrollmentScreen> {
     }
   }
 
+  Future<void> _deleteAllFaces() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete All Embeddings?'),
+        content: const Text('This will permanently remove all face data from Firestore. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete Everything'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _isProcessing = true;
+      _logs.add('⚠️ Deleting all face embeddings from Firestore...');
+    });
+
+    try {
+      await _bulkEnrollmentService.faceRecognitionService.deleteAllFaces();
+      setState(() {
+        _logs.add('✅ SUCCESS: All face embeddings have been deleted.');
+      });
+    } catch (e) {
+      setState(() {
+        _logs.add('❌ ERROR: Deletion failed: $e');
+      });
+    } finally {
+      setState(() {
+        _isProcessing = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Simple way to get colors if extension isn't working perfectly in this context, 
@@ -260,6 +304,26 @@ class _BulkEnrollmentScreenState extends State<BulkEnrollmentScreen> {
                         );
                       },
                     ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Danger Zone
+            DSCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DSText('Danger Zone', role: TypographyRole.headline, style: const TextStyle(color: Colors.red)),
+                  const SizedBox(height: 8),
+                  const Text('Need a fresh start? Delete all existing face data before uploading new files.'),
+                  const SizedBox(height: 16),
+                  DSButton(
+                    label: 'Delete All Face Embeddings',
+                    icon: Icons.delete_forever,
+                    variant: DSButtonVariant.danger,
+                    onPressed: _isProcessing ? null : _deleteAllFaces,
                   ),
                 ],
               ),

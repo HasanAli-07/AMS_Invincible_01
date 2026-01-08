@@ -12,6 +12,7 @@
 
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'face_detector_service.dart';
 import 'face_embedding_service.dart';
@@ -50,13 +51,8 @@ class FaceRecognitionService {
     required Uint8List imageBytes,
     String? imagePath,
   }) async {
-    // Step 1: Detect faces
-    final faces = await _faceDetector.detectFacesFromBytes(
-      imageBytes,
-      640, // Assume standard camera resolution
-      480,
-      InputImageRotation.rotation0deg, // Will be properly typed from ML Kit
-    );
+    // Step 1: Detect faces using encoding-aware detection (handles JPEG/PNG)
+    final faces = await _faceDetector.detectFacesFromEncodedBytes(imageBytes);
 
     if (faces.isEmpty) {
       throw Exception('No face detected in image');
@@ -68,8 +64,8 @@ class FaceRecognitionService {
 
     final face = faces.first;
 
-    // Step 2: Check face quality
-    if (!face.isAcceptableQuality) {
+    // Step 2: Check face quality (strict for registration)
+    if (!face.isAcceptableQuality(strict: true)) {
       throw Exception(
         'Face quality is not acceptable. Please ensure:\n'
         '- Face is clearly visible\n'
@@ -113,17 +109,23 @@ class FaceRecognitionService {
   /// - Returns recognition results
   Future<FaceRecognitionResult> recognizeFaces({
     required Uint8List imageBytes,
-    int imageWidth = 640,
-    int imageHeight = 480,
+    int? imageWidth,
+    int? imageHeight,
     InputImageRotation rotation = InputImageRotation.rotation0deg,
   }) async {
     // Step 1: Detect all faces
-    final detectedFaces = await _faceDetector.detectFacesFromBytes(
-      imageBytes,
-      imageWidth,
-      imageHeight,
-      rotation,
-    );
+    // If width/height not provided, assume encoded bytes (JPEG/PNG)
+    final List<DetectedFace> detectedFaces;
+    if (imageWidth == null || imageHeight == null) {
+      detectedFaces = await _faceDetector.detectFacesFromEncodedBytes(imageBytes);
+    } else {
+      detectedFaces = await _faceDetector.detectFacesFromBytes(
+        imageBytes,
+        imageWidth,
+        imageHeight,
+        rotation,
+      );
+    }
 
     if (detectedFaces.isEmpty) {
       return FaceRecognitionResult(
@@ -134,13 +136,14 @@ class FaceRecognitionService {
 
     // Step 2: Get all stored faces for matching
     final storedFaces = await _faceRepository.getAllFaces();
+    debugPrint('Face Recognition: Processing ${detectedFaces.length} faces against ${storedFaces.length} stored embeddings');
 
     // Step 3: Process each detected face
     final recognizedFaces = <RecognizedFace>[];
 
     for (final detectedFace in detectedFaces) {
-      // Skip low-quality faces
-      if (!detectedFace.isAcceptableQuality) {
+      // Skip low-quality faces (lenient for recognition)
+      if (!detectedFace.isAcceptableQuality(strict: false)) {
         recognizedFaces.add(
           RecognizedFace(
             detectedFace: detectedFace,
@@ -165,6 +168,12 @@ class FaceRecognitionService {
         // Find best match
         final match = _faceMatcher.findBestMatch(embedding, storedFaces);
 
+        if (match != null && match.isMatch) {
+          debugPrint('✅ Face Match found! Student: ${match.matchedFace.userId} (${match.matchedFace.userName}), Similarity: ${match.similarity.toStringAsFixed(3)}');
+        } else if (match != null) {
+          debugPrint('❌ No high-confidence match. Best guess: ${match.matchedFace.userId}, Similarity: ${match.similarity.toStringAsFixed(3)} (Threshold: ${_faceMatcher.threshold})');
+        }
+
         recognizedFaces.add(
           RecognizedFace(
             detectedFace: detectedFace,
@@ -172,6 +181,7 @@ class FaceRecognitionService {
           ),
         );
       } catch (e) {
+        debugPrint('⚠️ Error processing detected face: $e');
         // If processing fails, add as unrecognized
         recognizedFaces.add(
           RecognizedFace(
@@ -195,14 +205,59 @@ class FaceRecognitionService {
       throw Exception('Image file not found: $imagePath');
     }
 
-    final imageBytes = await file.readAsBytes();
+    // Use ML Kit's fromFilePath for better accuracy and automatic format handling
+    final detectedFaces = await _faceDetector.detectFacesFromFile(imagePath);
     
-    // Try to get image dimensions (simplified - in production, use proper image library)
-    // For now, assume standard camera resolution
-    return await recognizeFaces(
-      imageBytes: imageBytes,
-      imageWidth: 640,
-      imageHeight: 480,
+    if (detectedFaces.isEmpty) {
+      return FaceRecognitionResult(
+        recognizedFaces: [],
+        totalFacesDetected: 0,
+      );
+    }
+
+    final imageBytes = await file.readAsBytes();
+    final storedFaces = await _faceRepository.getAllFaces();
+    final recognizedFaces = <RecognizedFace>[];
+
+    for (final detectedFace in detectedFaces) {
+      // For recognition, we can be slightly more lenient with quality than for enrollment
+      // but still filter out extreme cases
+      try {
+        const targetSize = 112;
+        final croppedFace = await _faceDetector.cropFace(
+          imageBytes,
+          detectedFace,
+          targetSize,
+        );
+
+        final embedding = await _embeddingService.generateEmbedding(croppedFace);
+        final match = _faceMatcher.findBestMatch(embedding, storedFaces);
+
+        if (match != null && match.isMatch) {
+          debugPrint('✅ Face [File] Match found! Student: ${match.matchedFace.userId} (${match.matchedFace.userName}), Similarity: ${match.similarity.toStringAsFixed(3)}');
+        } else if (match != null) {
+          debugPrint('❌ Face [File] Low confidence: guess ${match.matchedFace.userId}, score: ${match.similarity.toStringAsFixed(3)} (Threshold: ${_faceMatcher.threshold})');
+        }
+
+        recognizedFaces.add(
+          RecognizedFace(
+            detectedFace: detectedFace,
+            match: match,
+          ),
+        );
+      } catch (e) {
+        recognizedFaces.add(
+          RecognizedFace(
+            detectedFace: detectedFace,
+            match: null,
+          ),
+        );
+      }
+    }
+
+    return FaceRecognitionResult(
+      recognizedFaces: recognizedFaces,
+      totalFacesDetected: detectedFaces.length,
     );
   }
 
@@ -214,6 +269,11 @@ class FaceRecognitionService {
   /// Delete all faces for a user
   Future<void> deleteUserFaces(String userId) async {
     await _faceRepository.deleteFacesByUserId(userId);
+  }
+
+  /// Delete all registered faces
+  Future<void> deleteAllFaces() async {
+    await _faceRepository.deleteAllFaces();
   }
 
   /// Get recognition statistics

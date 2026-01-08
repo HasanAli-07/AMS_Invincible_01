@@ -19,8 +19,15 @@ import '../auth/auth_routes.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/radius_tokens.dart';
 import '../../ml/attendance_face_recognition_service.dart';
+import '../../core/providers/app_provider.dart';
+import '../../firebase/services/firestore_teacher_service.dart';
+import '../../firebase/services/firestore_subject_service.dart';
+import '../../firebase/services/firestore_class_service.dart';
+import '../../core/models/user_model.dart';
+import '../../core/services/batch_update_service.dart';
+import 'package:flutter/foundation.dart';
 
-/// Enhanced Teacher Dashboard with better UX and no overflow
+/// Enhanced Teacher Dashboard with Firestore integration
 class TeacherDashboardScreen extends StatefulWidget {
   const TeacherDashboardScreen({super.key});
 
@@ -30,22 +37,29 @@ class TeacherDashboardScreen extends StatefulWidget {
 
 class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   int _currentIndex = 0;
-  String? selectedSubject;
-  String? selectedBatch;
 
   @override
   Widget build(BuildContext context) {
+    final appState = AppProvider.of(context);
+    final currentUser = appState.currentUser;
     final colors = context.colors;
+
+    if (currentUser == null || currentUser.role != UserRole.teacher) {
+      // Redirect to login if not authenticated as teacher
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          AuthRoutes.login,
+          (route) => false,
+        );
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     Widget content;
     switch (_currentIndex) {
       case 0:
-        content = _HomeView(
-          selectedSubject: selectedSubject,
-          selectedBatch: selectedBatch,
-          onSubjectChanged: (value) => setState(() => selectedSubject = value),
-          onBatchChanged: (value) => setState(() => selectedBatch = value),
-        );
+        content = _HomeView(teacherId: currentUser.id);
         break;
       case 1:
         // History - Navigate to separate screen
@@ -55,12 +69,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
             MaterialPageRoute(builder: (_) => const AttendanceHistoryScreen()),
           );
         });
-        content = _HomeView(
-          selectedSubject: selectedSubject,
-          selectedBatch: selectedBatch,
-          onSubjectChanged: (value) => setState(() => selectedSubject = value),
-          onBatchChanged: (value) => setState(() => selectedBatch = value),
-        );
+        content = _HomeView(teacherId: currentUser.id);
         break;
       case 2:
         // Notifications - Navigate to separate screen
@@ -70,12 +79,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
             MaterialPageRoute(builder: (_) => const NotificationsScreen()),
           );
         });
-        content = _HomeView(
-          selectedSubject: selectedSubject,
-          selectedBatch: selectedBatch,
-          onSubjectChanged: (value) => setState(() => selectedSubject = value),
-          onBatchChanged: (value) => setState(() => selectedBatch = value),
-        );
+        content = _HomeView(teacherId: currentUser.id);
         break;
       case 3:
         // Profile - Navigate to separate screen
@@ -85,29 +89,20 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
             MaterialPageRoute(builder: (_) => const ProfileScreen()),
           );
         });
-        content = _HomeView(
-          selectedSubject: selectedSubject,
-          selectedBatch: selectedBatch,
-          onSubjectChanged: (value) => setState(() => selectedSubject = value),
-          onBatchChanged: (value) => setState(() => selectedBatch = value),
-        );
+        content = _HomeView(teacherId: currentUser.id);
         break;
       default:
-        content = _HomeView(
-          selectedSubject: selectedSubject,
-          selectedBatch: selectedBatch,
-          onSubjectChanged: (value) => setState(() => selectedSubject = value),
-          onBatchChanged: (value) => setState(() => selectedBatch = value),
-        );
+        content = _HomeView(teacherId: currentUser.id);
     }
 
     return Scaffold(
       backgroundColor: colors.backgroundPrimary,
       appBar: DSAppBar(
-        name: 'Prof. Smith',
-        department: 'Computer Science Dept.',
+        name: currentUser.name,
+        department: currentUser.department ?? 'Department',
         notificationCount: 3,
         onLogoutTap: () {
+          appState.logout();
           Navigator.pushNamedAndRemoveUntil(
             context,
             AuthRoutes.login,
@@ -149,39 +144,202 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   }
 }
 
-class _HomeView extends StatelessWidget {
-  final String? selectedSubject;
-  final String? selectedBatch;
-  final ValueChanged<String?> onSubjectChanged;
-  final ValueChanged<String?> onBatchChanged;
+class _HomeView extends StatefulWidget {
+  final String teacherId;
 
-  const _HomeView({
-    required this.selectedSubject,
-    required this.selectedBatch,
-    required this.onSubjectChanged,
-    required this.onBatchChanged,
-  });
+  const _HomeView({required this.teacherId});
+
+  @override
+  State<_HomeView> createState() => _HomeViewState();
+}
+
+class _HomeViewState extends State<_HomeView> {
+  final FirestoreTeacherService _teacherService = FirestoreTeacherService();
+  final FirestoreSubjectService _subjectService = FirestoreSubjectService();
+  final FirestoreClassService _classService = FirestoreClassService();
+
+  List<Map<String, dynamic>> _subjects = [];
+  List<Map<String, dynamic>> _classes = [];
+  bool _isLoading = true;
+  String? _selectedSubjectId;
+  String? _selectedClassId;
+  Map<String, dynamic>? _teacherData;
+  DateTime _selectedDate = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTeacherData();
+  }
+
+  Future<void> _loadTeacherData() async {
+    setState(() => _isLoading = true);
+    try {
+      // Get teacher data
+      final teacher = await _teacherService.getTeacherById(widget.teacherId);
+      if (teacher != null) {
+        _teacherData = teacher;
+        final subjectIds = (teacher['subjectIds'] as List<dynamic>?)?.cast<String>() ?? [];
+        
+        // Fetch all subjects
+        final allSubjects = await _subjectService.getAllSubjects();
+        _subjects = allSubjects.where((s) => subjectIds.contains(s['id'])).toList();
+        
+        // Fetch all classes
+        _classes = await _classService.getAllClasses();
+        
+        if (_subjects.isNotEmpty) {
+          _selectedSubjectId = _subjects.first['id'] as String;
+          // Update classes for first subject
+          _updateClassesForSubject(_selectedSubjectId!);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading teacher data: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  /// Update available classes based on selected subject's department
+  Future<void> _updateClassesForSubject(String subjectId) async {
+    try {
+      final subject = _subjects.firstWhere(
+        (s) => s['id'] == subjectId,
+        orElse: () => {},
+      );
+      
+      if (subject.isNotEmpty) {
+        final subjectDepartment = (subject['department'] as String? ?? '').trim().toLowerCase();
+        debugPrint('Updating classes for subject department: $subjectDepartment');
+        
+        // Fetch all classes to have a backup
+        final allAvailableClasses = await _classService.getAllClasses();
+        debugPrint('Total classes found in system: ${allAvailableClasses.length}');
+        
+        // Filter classes by department (fuzzy match)
+        if (subjectDepartment.isNotEmpty) {
+          _classes = allAvailableClasses.where((c) {
+            final classDept = (c['department'] as String? ?? '').trim().toLowerCase();
+            return classDept == subjectDepartment || 
+                   classDept.contains(subjectDepartment) || 
+                   subjectDepartment.contains(classDept);
+          }).toList();
+          debugPrint('Filtered classes for department "$subjectDepartment": ${_classes.length}');
+        } else {
+          _classes = allAvailableClasses;
+        }
+        
+        // If no classes found for this department, fall back to all classes
+        if (_classes.isEmpty && allAvailableClasses.isNotEmpty) {
+          debugPrint('No classes found for department, falling back to all classes');
+          _classes = allAvailableClasses;
+        }
+        
+        // Optional: Sort classes by name
+        _classes.sort((a, b) => (a['name'] as String? ?? '').compareTo(b['name'] as String? ?? ''));
+        
+        // Auto-select first class or maintain selection if possible
+        if (_classes.isNotEmpty) {
+          // If previous selection is still in list, keep it
+          if (_selectedClassId != null && _classes.any((c) => c['id'] == _selectedClassId)) {
+            // Keep existing selection
+          } else {
+            _selectedClassId = _classes.first['id'] as String;
+          }
+        } else {
+          _selectedClassId = null;
+        }
+        
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Error updating classes for subject: $e');
+    }
+  }
+
+  /// Force Sync Database with Batch 5
+  Future<void> _handleForceSync(BuildContext context) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+    
+    try {
+      final migrator = BatchUpdateService();
+      final result = await migrator.updateAllStudentsToBatch5();
+      
+      if (context.mounted) Navigator.pop(context); // Close loading
+      
+      if (result['success'] == true) {
+         ScaffoldMessenger.of(context).showSnackBar(
+           const SnackBar(
+             content: Text('Database successfully synced with Batch 5 and CE department!'),
+             backgroundColor: Colors.green,
+           ),
+         );
+         // Reload data
+         await _loadTeacherData();
+      } else {
+         ScaffoldMessenger.of(context).showSnackBar(
+           SnackBar(content: Text('Sync failed: ${result['error']}'), backgroundColor: Colors.red),
+         );
+      }
+    } catch (e) {
+      if (context.mounted) Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sync Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_subjects.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.book_outlined, size: 64, color: colors.textSecondary),
+            const SizedBox(height: SpacingTokens.space16),
+            DSText(
+              'No subjects assigned',
+              role: TypographyRole.headline,
+            ),
+            const SizedBox(height: SpacingTokens.space8),
+            DSText(
+              'Please contact administrator to assign subjects',
+              role: TypographyRole.body,
+              style: TextStyle(color: colors.textSecondary),
+            ),
+          ],
+        ),
+      );
+    }
 
     return SingleChildScrollView(
       padding: Insets.screenPadding,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // WhatsApp Attendance Section
+          // Face Recognition Attendance Section
           Wrap(
             spacing: SpacingTokens.space8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               DSText(
-                'WhatsApp Attendance',
+                'Face Recognition Attendance',
                 role: TypographyRole.headline,
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              const DSBadge(label: 'PRIMARY', variant: DSBadgeVariant.success),
+              const DSBadge(label: 'AI POWERED', variant: DSBadgeVariant.success),
             ],
           ),
           Insets.spaceVertical16,
@@ -191,7 +349,7 @@ class _HomeView extends StatelessWidget {
               children: [
                 Expanded(
                   child: DSText(
-                    'Snap a clear photo of the classroom and send it to our AI bot for instant analysis.',
+                    'Take a photo of your class and AI will automatically recognize students and mark attendance.',
                     role: TypographyRole.body,
                   ),
                 ),
@@ -204,7 +362,7 @@ class _HomeView extends StatelessWidget {
                     borderRadius: RadiusTokens.button,
                   ),
                   child: Icon(
-                    Icons.qr_code_scanner,
+                    Icons.face,
                     color: colors.success,
                     size: 32,
                   ),
@@ -212,89 +370,7 @@ class _HomeView extends StatelessWidget {
               ],
             ),
           ),
-          Insets.spaceVertical12,
-          DSButton(
-            label: 'Open WhatsApp',
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Opening WhatsApp...')),
-              );
-            },
-            icon: Icons.chat,
-          ),
-          Insets.spaceVertical16,
-          // Bot Number - Responsive Row
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isSmall = constraints.maxWidth < 350;
-              return isSmall
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(Icons.smart_toy, color: colors.accentPrimary, size: 20),
-                            const SizedBox(width: SpacingTokens.space8),
-                            DSText(
-                              'Bot Number',
-                              role: TypographyRole.body,
-                              style: const TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                          ],
-                        ),
-                        Insets.spaceVertical8,
-                        Row(
-                          children: [
-                            Expanded(
-                              child: DSText(
-                                '+1 (555) 019-2834',
-                                role: TypographyRole.body,
-                              ),
-                            ),
-                            IconButton(
-                              icon: Icon(Icons.copy, size: 18, color: colors.accentPrimary),
-                              onPressed: () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Bot number copied!')),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ],
-                    )
-                  : Row(
-                      children: [
-                        Icon(Icons.smart_toy, color: colors.accentPrimary, size: 20),
-                        const SizedBox(width: SpacingTokens.space8),
-                        DSText(
-                          'Bot Number',
-                          role: TypographyRole.body,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        const Spacer(),
-                        DSText(
-                          '+1 (555) 019-2834',
-                          role: TypographyRole.body,
-                          maxLines: 1,
-                        ),
-                        const SizedBox(width: SpacingTokens.space8),
-                        IconButton(
-                          icon: Icon(Icons.copy, size: 18, color: colors.accentPrimary),
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Bot number copied!')),
-                            );
-                          },
-                        ),
-                      ],
-                    );
-            },
-          ),
           Insets.spaceVertical24,
-          // Enhanced Timeline with proper visual flow
-          _EnhancedTimelineSection(),
-          Insets.spaceVertical32,
           // Divider
           Row(
             children: [
@@ -302,7 +378,7 @@ class _HomeView extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: SpacingTokens.space16),
                 child: DSText(
-                  'OR USE APP',
+                  'SELECT SUBJECT & CLASS',
                   role: TypographyRole.caption,
                   style: TextStyle(
                     color: colors.textSecondary,
@@ -313,21 +389,100 @@ class _HomeView extends StatelessWidget {
               Expanded(child: Divider(color: colors.borderSubtle)),
             ],
           ),
-          Insets.spaceVertical32,
-          // Manual Entry Section
-          Wrap(
-            spacing: SpacingTokens.space8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              DSText(
-                'Manual Entry',
-                role: TypographyRole.headline,
-                style: const TextStyle(fontWeight: FontWeight.bold),
+          Insets.spaceVertical24,
+          // Date Selection
+          DSText(
+            'DATE',
+            role: TypographyRole.caption,
+            style: TextStyle(
+              color: colors.textSecondary,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+          Insets.spaceVertical8,
+          InkWell(
+            onTap: () async {
+              final pickedDate = await showDatePicker(
+                context: context,
+                initialDate: _selectedDate,
+                firstDate: DateTime(2020),
+                lastDate: DateTime(2030),
+                builder: (context, child) {
+                  return Theme(
+                    data: Theme.of(context).copyWith(
+                      colorScheme: ColorScheme.light(
+                        primary: colors.accentPrimary,
+                        onPrimary: Colors.white,
+                      ),
+                    ),
+                    child: child!,
+                  );
+                },
+              );
+              if (pickedDate != null) {
+                setState(() {
+                  _selectedDate = pickedDate;
+                });
+              }
+            },
+            child: Container(
+              padding: Insets.buttonPadding,
+              decoration: BoxDecoration(
+                color: colors.backgroundSurface,
+                border: Border.all(color: colors.borderSubtle),
+                borderRadius: RadiusTokens.button,
               ),
-              const DSBadge(label: 'BACKUP', variant: DSBadgeVariant.secondary),
-            ],
+              child: Row(
+                children: [
+                  Icon(Icons.calendar_today, color: colors.accentPrimary, size: 20),
+                  const SizedBox(width: SpacingTokens.space12),
+                  DSText(
+                    '${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}',
+                    role: TypographyRole.body,
+                  ),
+                  const Spacer(),
+                  Icon(Icons.arrow_drop_down, color: colors.textSecondary),
+                ],
+              ),
+            ),
           ),
           Insets.spaceVertical16,
+          // Temporary Sync Button (Only if no classes found)
+          if (_classes.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 24),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: RadiusTokens.card,
+                  border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                ),
+                child: Column(
+                  children: [
+                    const DSText(
+                      'No Classes Available',
+                      role: TypographyRole.title,
+                      style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    const DSText(
+                      'The database needs to be synced with Batch 5 and Computer Engineering department.',
+                      role: TypographyRole.body,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    DSButton(
+                      label: 'Force Sync Database (Batch 5)',
+                      icon: Icons.sync,
+                      onPressed: () => _handleForceSync(context),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          // Subject Dropdown
           DSText(
             'SUBJECT',
             role: TypographyRole.caption,
@@ -339,17 +494,30 @@ class _HomeView extends StatelessWidget {
           ),
           Insets.spaceVertical8,
           _DropdownField(
-            value: selectedSubject ?? 'CS-101 Data Structures',
-            onChanged: onSubjectChanged,
-            items: const [
-              'CS-101 Data Structures',
-              'CS-201 Algorithms',
-              'CS-301 Database Systems',
-            ],
+            value: _selectedSubjectId ?? '',
+            onChanged: (value) {
+              if (value != null && value.isNotEmpty) {
+                setState(() {
+                  _selectedSubjectId = value;
+                  // When subject changes, update available classes based on subject's department
+                  _updateClassesForSubject(value);
+                });
+              }
+            },
+            items: _subjects.map((subject) {
+              final name = subject['name'] as String? ?? '';
+              final code = subject['code'] as String? ?? '';
+              return DropdownMenuItem<String>(
+                value: subject['id'] as String,
+                child: DSText('$code - $name', role: TypographyRole.body, maxLines: 1),
+              );
+            }).toList(),
+            isEmpty: _subjects.isEmpty,
           ),
           Insets.spaceVertical16,
+          // Class/Batch Dropdown
           DSText(
-            'BATCH / SEMESTER',
+            'CLASS / BATCH',
             role: TypographyRole.caption,
             style: TextStyle(
               color: colors.textSecondary,
@@ -359,16 +527,22 @@ class _HomeView extends StatelessWidget {
           ),
           Insets.spaceVertical8,
           _DropdownField(
-            value: selectedBatch ?? '2024-A (Sem 3)',
-            onChanged: onBatchChanged,
-            items: const [
-              '2024-A (Sem 3)',
-              '2024-B (Sem 3)',
-              '2023-A (Sem 5)',
-            ],
+            value: _selectedClassId ?? '',
+            onChanged: (value) {
+              setState(() => _selectedClassId = value);
+            },
+            items: _classes.map((classData) {
+              final name = classData['name'] as String? ?? '';
+              final dept = classData['department'] as String? ?? '';
+              return DropdownMenuItem<String>(
+                value: classData['id'] as String,
+                child: DSText('$name ($dept)', role: TypographyRole.body, maxLines: 1),
+              );
+            }).toList(),
+            isEmpty: _classes.isEmpty,
           ),
-          Insets.spaceVertical16,
-          // Photo Options - Responsive Grid
+          Insets.spaceVertical24,
+          // Photo Options
           LayoutBuilder(
             builder: (context, constraints) {
               final isSmall = constraints.maxWidth < 400;
@@ -409,14 +583,6 @@ class _HomeView extends StatelessWidget {
                     );
             },
           ),
-          Insets.spaceVertical16,
-          DSButton(
-            label: 'Analyze Class Photo',
-            onPressed: () {
-              Navigator.pushNamed(context, '/teacher/attendance-confirm');
-            },
-            icon: Icons.bar_chart,
-          ),
           Insets.spaceVertical32,
         ],
       ),
@@ -425,84 +591,27 @@ class _HomeView extends StatelessWidget {
 
   /// Open camera to capture class photo for attendance
   Future<void> _handleCamera(BuildContext context) async {
+    if (_selectedSubjectId == null || _selectedClassId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select subject and class first'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     final picker = ImagePicker();
     try {
       final image = await picker.pickImage(
         source: ImageSource.camera,
-        preferredCameraDevice: CameraDevice.front,
+        preferredCameraDevice: CameraDevice.rear,
         imageQuality: 85,
       );
 
       if (image == null) return;
 
-      // Show loading indicator
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-
-      try {
-        // Read image bytes
-        final imageBytes = await image.readAsBytes();
-
-        // Process with face recognition
-        final faceRecognitionService = AttendanceFaceRecognitionService();
-        final result = await faceRecognitionService.processAttendancePhoto(
-          imageBytes: imageBytes,
-        );
-
-        // Close loading dialog
-        if (context.mounted) Navigator.pop(context);
-
-        // Show results
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Detected ${result.totalFacesDetected} faces. '
-                'Recognized ${result.recognizedCount} students.',
-              ),
-              duration: const Duration(seconds: 3),
-            ),
-          );
-
-          // Navigate to confirmation screen with recognition results
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => AttendanceConfirmScreen(
-                recognitionResult: result,
-                imagePath: image.path,
-              ),
-            ),
-          );
-        }
-      } catch (e) {
-        // Close loading dialog
-        if (context.mounted) Navigator.pop(context);
-
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Face recognition error: $e'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-
-          // Still navigate to confirmation screen even if recognition fails
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => AttendanceConfirmScreen(
-                imagePath: image.path,
-              ),
-            ),
-          );
-        }
-      }
+      await _processImage(context, image.path, await image.readAsBytes());
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Camera error: $e')),
@@ -512,6 +621,16 @@ class _HomeView extends StatelessWidget {
 
   /// Open gallery/file picker to upload class photo for attendance
   Future<void> _handleUpload(BuildContext context) async {
+    if (_selectedSubjectId == null || _selectedClassId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select subject and class first'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     final picker = ImagePicker();
     try {
       final image = await picker.pickImage(
@@ -521,232 +640,115 @@ class _HomeView extends StatelessWidget {
 
       if (image == null) return;
 
-      // Show loading indicator
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-
-      try {
-        // Process with face recognition
-        final faceRecognitionService = AttendanceFaceRecognitionService();
-        final result = await faceRecognitionService.processAttendancePhotoFromFile(
-          image.path,
-        );
-
-        // Close loading dialog
-        if (context.mounted) Navigator.pop(context);
-
-        // Show results
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Detected ${result.totalFacesDetected} faces. '
-                'Recognized ${result.recognizedCount} students.',
-              ),
-              duration: const Duration(seconds: 3),
-            ),
-          );
-
-          // Navigate to confirmation screen with recognition results
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => AttendanceConfirmScreen(
-                recognitionResult: result,
-                imagePath: image.path,
-              ),
-            ),
-          );
-        }
-      } catch (e) {
-        // Close loading dialog
-        if (context.mounted) Navigator.pop(context);
-
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Face recognition error: $e'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-
-          // Still navigate to confirmation screen even if recognition fails
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => AttendanceConfirmScreen(
-                imagePath: image.path,
-              ),
-            ),
-          );
-        }
-      }
+      await _processImage(context, image.path, await image.readAsBytes());
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Upload error: $e')),
       );
     }
   }
-}
 
-/// Enhanced Timeline with proper visual flow and animations
-class _EnhancedTimelineSection extends StatefulWidget {
-  @override
-  State<_EnhancedTimelineSection> createState() => _EnhancedTimelineSectionState();
-}
-
-class _EnhancedTimelineSectionState extends State<_EnhancedTimelineSection> {
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        DSText(
-          'LIVE STATUS: TODAY, 9:30 AM',
-          role: TypographyRole.caption,
-          style: TextStyle(
-            color: colors.textSecondary,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.5,
-          ),
-        ),
-        Insets.spaceVertical16,
-        // Timeline with connecting lines
-        Column(
-          children: [
-            _TimelineItem(
-              icon: Icons.check_circle,
-              iconColor: colors.success,
-              title: 'Image Sent',
-              subtitle: '9:30 AM via WhatsApp',
-              isCompleted: true,
-              isLast: false,
-            ),
-            _TimelineItem(
-              icon: Icons.refresh,
-              iconColor: colors.accentPrimary,
-              title: 'Processing Faces',
-              subtitle: 'AI is analyzing student count...',
-              isCompleted: false,
-              isActive: true,
-              isLast: false,
-            ),
-            _TimelineItem(
-              icon: Icons.radio_button_unchecked,
-              iconColor: colors.textSecondary,
-              title: 'Pending Confirmation',
-              subtitle: 'Waiting for your review',
-              isCompleted: false,
-              isLast: true,
-            ),
-          ],
-        ),
-      ],
+  Future<void> _processImage(BuildContext context, String imagePath, Uint8List imageBytes) async {
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
     );
-  }
-}
 
-class _TimelineItem extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String subtitle;
-  final bool isCompleted;
-  final bool isActive;
-  final bool isLast;
+    try {
+      // Process with face recognition
+      final faceRecognitionService = AttendanceFaceRecognitionService();
+      final result = await faceRecognitionService.processAttendancePhoto(
+        imageBytes: imageBytes,
+      );
 
-  const _TimelineItem({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.subtitle,
-    this.isCompleted = false,
-    this.isActive = false,
-    this.isLast = false,
-  });
+      // Close loading dialog
+      if (context.mounted) Navigator.pop(context);
 
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
+      // Navigate to confirmation screen
+      if (context.mounted) {
+        final selectedSubject = _subjects.firstWhere(
+          (s) => s['id'] == _selectedSubjectId,
+          orElse: () => {},
+        );
+        final selectedClass = _classes.firstWhere(
+          (c) => c['id'] == _selectedClassId,
+          orElse: () => {},
+        );
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: (isCompleted || isActive)
-                    ? iconColor.withOpacity(0.1)
-                    : colors.backgroundElevated,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: isCompleted || isActive ? iconColor : colors.borderSubtle,
-                  width: 2,
-                ),
-              ),
-              child: Icon(icon, color: iconColor, size: 20),
-            ),
-            if (!isLast)
-              Container(
-                width: 2,
-                height: 40,
-                margin: const EdgeInsets.symmetric(vertical: SpacingTokens.space4),
-                decoration: BoxDecoration(
-                  color: isCompleted ? iconColor.withOpacity(0.3) : colors.borderSubtle,
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(width: SpacingTokens.space12),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(top: SpacingTokens.space8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                DSText(
-                  title,
-                  role: TypographyRole.body,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: isActive ? colors.accentPrimary : colors.textPrimary,
-                  ),
-                ),
-                if (subtitle.isNotEmpty) ...[
-                  Insets.spaceVertical4,
-                  DSText(
-                    subtitle,
-                    role: TypographyRole.caption,
-                  ),
-                ],
-              ],
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AttendanceConfirmScreen(
+              recognitionResult: result,
+              imagePath: imagePath,
+              subjectId: _selectedSubjectId!,
+              subjectName: selectedSubject['name'] as String? ?? '',
+              subjectCode: selectedSubject['code'] as String? ?? '',
+              classId: _selectedClassId!,
+              className: selectedClass['name'] as String? ?? '',
+              teacherId: widget.teacherId,
+              date: _selectedDate,
             ),
           ),
-        ),
-      ],
-    );
+        );
+      }
+    } catch (e) {
+      // Close loading dialog
+      if (context.mounted) Navigator.pop(context);
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Face recognition error: $e'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+
+        // Still navigate to confirmation screen even if recognition fails
+        final selectedSubject = _subjects.firstWhere(
+          (s) => s['id'] == _selectedSubjectId,
+          orElse: () => {},
+        );
+        final selectedClass = _classes.firstWhere(
+          (c) => c['id'] == _selectedClassId,
+          orElse: () => {},
+        );
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AttendanceConfirmScreen(
+              imagePath: imagePath,
+              subjectId: _selectedSubjectId!,
+              subjectName: selectedSubject['name'] as String? ?? '',
+              subjectCode: selectedSubject['code'] as String? ?? '',
+              classId: _selectedClassId!,
+              className: selectedClass['name'] as String? ?? '',
+              teacherId: widget.teacherId,
+              date: _selectedDate,
+            ),
+          ),
+        );
+      }
+    }
   }
 }
 
 class _DropdownField extends StatelessWidget {
   final String value;
   final ValueChanged<String?> onChanged;
-  final List<String> items;
+  final List<DropdownMenuItem<String>> items;
+  final bool isEmpty;
 
   const _DropdownField({
     required this.value,
     required this.onChanged,
     required this.items,
+    this.isEmpty = false,
   });
 
   @override
@@ -761,17 +763,23 @@ class _DropdownField extends StatelessWidget {
         borderRadius: RadiusTokens.button,
       ),
       child: DropdownButton<String>(
-        value: value,
+        value: (value.isEmpty || !items.any((item) => item.value == value)) && items.isNotEmpty 
+            ? items.first.value 
+            : value.isEmpty 
+                ? null 
+                : value,
         isExpanded: true,
         underline: const SizedBox(),
         icon: Icon(Icons.arrow_drop_down, color: colors.textSecondary),
-        items: items.map((item) {
-          return DropdownMenuItem(
-            value: item,
-            child: DSText(item, role: TypographyRole.body, maxLines: 1),
-          );
-        }).toList(),
-        onChanged: onChanged,
+        items: items,
+        onChanged: isEmpty ? null : onChanged,
+        hint: isEmpty
+            ? DSText(
+                'No items available',
+                role: TypographyRole.body,
+                style: TextStyle(color: colors.textSecondary),
+              )
+            : null,
       ),
     );
   }
