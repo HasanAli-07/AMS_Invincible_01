@@ -60,6 +60,7 @@ dependencies:
   path: ^1.9.1
   mockito: ^5.6.1
   excel: ^4.0.6
+  google_generative_ai: ^0.4.7
 
 dev_dependencies:
   flutter_test:

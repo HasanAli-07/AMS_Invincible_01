@@ -26,6 +26,7 @@ import '../../firebase/services/firestore_class_service.dart';
 import '../../core/models/user_model.dart';
 import '../../core/services/batch_update_service.dart';
 import 'package:flutter/foundation.dart';
+import '../common/ai_chat_screen.dart';
 
 /// Enhanced Teacher Dashboard with Firestore integration
 class TeacherDashboardScreen extends StatefulWidget {
@@ -111,6 +112,22 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
         },
       ),
       body: content,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          // Get current class context from HomeView state if possible, 
+          // but since access is tricky, we'll default to General Context
+          // or ideally, user picks context in Chat Screen.
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const AiChatScreen(className: 'General'),
+            ),
+          );
+        },
+        label: const Text('Ask AI'),
+        icon: const Icon(Icons.chat_bubble_outline),
+        backgroundColor: colors.accentPrimary,
+      ),
       bottomNavigationBar: DSBottomNav(
         currentIndex: _currentIndex == 0 ? 0 : 0,
         onTap: (index) {
